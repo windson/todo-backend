@@ -26,22 +26,22 @@ export const UpdateTodoSchema = z.object({
 
 export const CreateCategorySchema = z.object({
   name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less"),
-  color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color"),
+  color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color").regex(/^#[0-9a-fA-F]{6}$/, "Color must be a valid hex color (e.g. #ff0000)"),
 });
 
 export const UpdateCategorySchema = z.object({
   name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less").optional(),
-  color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color").optional(),
+  color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color").regex(/^#[0-9a-fA-F]{6}$/, "Color must be a valid hex color (e.g. #ff0000)").optional(),
 });
 
 export const CreateTagSchema = z.object({
   name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less"),
-  color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color"),
+  color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color").regex(/^#[0-9a-fA-F]{6}$/, "Color must be a valid hex color (e.g. #ff0000)"),
 });
 
 export const UpdateTagSchema = z.object({
   name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less").optional(),
-  color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color").optional(),
+  color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color").regex(/^#[0-9a-fA-F]{6}$/, "Color must be a valid hex color (e.g. #ff0000)").optional(),
 });
 
 export const TodoQueryParamsSchema = z.object({
@@ -60,7 +60,7 @@ export const TodoQueryParamsSchema = z.object({
 
 export const BulkOperationSchema = z.object({
   operation: z.enum(["complete", "uncomplete", "delete"]),
-  ids: z.array(z.string()).min(1, "At least one ID is required"),
+  ids: z.array(z.string()).min(1, "At least one ID is required").max(50, "Cannot process more than 50 items at once"),
 });
 
 export const TodoTagsSchema = z.object({

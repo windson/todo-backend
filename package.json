@@ -24,7 +24,6 @@
     "prisma": "^7.8.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "swagger-ui-dist": "^5.32.8",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -32,7 +31,6 @@
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/swagger-ui-dist": "^3.30.5",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "ts-node": "^10.9.2",
