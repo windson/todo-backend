@@ -55,8 +55,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     // Resolve the invitee by exact email. Returns 404 rather than revealing
     // whether an account exists via a more specific message.
+    // Emails are stored lowercased at signup, so normalize the invite address
+    // before the exact-email lookup — otherwise a differently-cased address
+    // (e.g. "Foo@x.com") fails to resolve a real account stored as "foo@x.com".
     const invitee = await prisma.user.findUnique({
-      where: { email: parsed.data.email },
+      where: { email: parsed.data.email.toLowerCase() },
       select: { id: true, email: true, name: true },
     });
     if (!invitee) {

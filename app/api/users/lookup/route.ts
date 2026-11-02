@@ -23,8 +23,11 @@ export async function GET(request: NextRequest) {
       throw ApiError.badRequest("Invalid query parameters", parsed.error.issues);
     }
 
+    // Emails are stored lowercased at signup, so normalize the query address
+    // before the exact-email lookup so a differently-cased address still
+    // resolves the account it belongs to.
     const user = await prisma.user.findUnique({
-      where: { email: parsed.data.email },
+      where: { email: parsed.data.email.toLowerCase() },
       select: { id: true, email: true, name: true },
     });
 

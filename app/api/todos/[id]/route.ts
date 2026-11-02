@@ -79,11 +79,19 @@ export async function PATCH(
     // validated body field) OR an If-Unmodified-Since header, reject with 409
     // if the todo changed since. Backward compatible: with no token the update
     // proceeds unconditionally as before.
-    const expectedVersion =
-      expectedUpdatedAt !== undefined
-        ? expectedUpdatedAt.getTime()
-        : resolveExpectedVersionFromHeader(request);
-    assertUnmodified(expectedVersion, existing.updatedAt);
+    // The body field carries full millisecond precision and is compared at
+    // "ms" so two writes in the same clock second still conflict; the
+    // If-Unmodified-Since header only has second precision and is compared at
+    // "second" to avoid a spurious conflict.
+    if (expectedUpdatedAt !== undefined) {
+      assertUnmodified(expectedUpdatedAt.getTime(), existing.updatedAt, "ms");
+    } else {
+      assertUnmodified(
+        resolveExpectedVersionFromHeader(request),
+        existing.updatedAt,
+        "second"
+      );
+    }
 
     // Category, parent, and tags belong to the todo's OWNER's space, so they
     // are validated against ownerId (an editor edits within the owner's data).

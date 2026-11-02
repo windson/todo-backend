@@ -219,6 +219,38 @@ describe("POST /api/todos/:id/share", () => {
     expect(prismaMock.notification.create).toHaveBeenCalled();
   });
 
+  it("normalizes a differently-cased invite email to match the stored account", async () => {
+    // Account stored lowercased at signup; owner types the original casing.
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: "editor",
+      email: "editor@example.com",
+      name: null,
+    } as never);
+    prismaMock.todoShare.upsert.mockResolvedValue({
+      id: "share-1",
+      role: "VIEWER",
+      todoId: "todo-1",
+      userId: "editor",
+      user: { id: "editor", email: "editor@example.com", name: null },
+    } as never);
+
+    const res = await CREATE_SHARE(
+      makeRequest("http://localhost/api/todos/todo-1/share", ownerToken, {
+        method: "POST",
+        body: JSON.stringify({ email: "Editor@Example.com" }),
+        headers: { "Content-Type": "application/json" },
+      }),
+      { params: Promise.resolve({ id: "todo-1" }) }
+    );
+
+    expect(res.status).toBe(201);
+    // The lookup is performed with the lowercased address.
+    const arg = prismaMock.user.findUnique.mock.calls[0][0] as {
+      where: { email: string };
+    };
+    expect(arg.where.email).toBe("editor@example.com");
+  });
+
   it("returns 404 when no user matches the email", async () => {
     prismaMock.user.findUnique.mockResolvedValue(null);
 
@@ -371,6 +403,24 @@ describe("GET /api/users/lookup (exact email only)", () => {
     };
     expect(arg.where).toEqual({ email: "editor@example.com" });
     expect(arg.select).toEqual({ id: true, email: true, name: true });
+  });
+
+  it("normalizes a differently-cased query email to the lowercased lookup", async () => {
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: "editor",
+      email: "editor@example.com",
+      name: "Ed",
+    } as never);
+
+    const res = await LOOKUP(
+      makeRequest("http://localhost/api/users/lookup?email=Editor@Example.com", ownerToken)
+    );
+
+    expect(res.status).toBe(200);
+    const arg = prismaMock.user.findUnique.mock.calls[0][0] as {
+      where: { email: string };
+    };
+    expect(arg.where.email).toBe("editor@example.com");
   });
 
   it("returns null (not self) when the email is the requesting user", async () => {

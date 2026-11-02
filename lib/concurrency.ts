@@ -75,16 +75,6 @@ export function resolveExpectedVersion(
 }
 
 /**
- * Enforce the optimistic-concurrency check. No-op when `expected` is null
- * (client sent no token). Otherwise throws ApiError.conflict(409) when the
- * record's current `updatedAt` is newer than the version the client expected.
- *
- * Comparison is at second precision when the token came from an HTTP-date
- * header; to be safe across both token forms we compare on whole seconds so a
- * sub-second `updatedAt` difference from a second-precision header does not
- * cause a spurious conflict.
- */
-/**
  * Resolve the expected-version token from the If-Unmodified-Since header only
  * (epoch ms), or null when the header is absent. Throws ApiError.badRequest
  * when the header is present but unparseable. Used when the body field was
@@ -102,14 +92,50 @@ export function resolveExpectedVersionFromHeader(
   return ms;
 }
 
+/**
+ * Precision at which an expected-version token is compared against the
+ * record's current `updatedAt`:
+ *  - "ms": full millisecond precision. Use for the `expectedUpdatedAt` body
+ *    field, which carries a full ISO timestamp — two writes in the same wall
+ *    clock second MUST still conflict.
+ *  - "second": whole-second precision. Use for the `If-Unmodified-Since` HTTP
+ *    header, which is an HTTP-date and only carries second precision, so a
+ *    sub-second `updatedAt` difference must not cause a spurious conflict.
+ */
+export type VersionPrecision = "ms" | "second";
+
+/**
+ * Enforce the optimistic-concurrency check. No-op when `expected` is null
+ * (client sent no token). Otherwise throws ApiError.conflict(409) when the
+ * record's current `updatedAt` differs from the version the client expected.
+ *
+ * The body-field token (`expectedUpdatedAt`) carries millisecond precision and
+ * is compared at full precision ("ms"), so two writes landing in the same
+ * wall-clock second still conflict. The `If-Unmodified-Since` header path only
+ * has second precision and must be compared at "second" granularity to avoid a
+ * spurious conflict. Defaults to "ms" so the stricter check is the default.
+ */
 export function assertUnmodified(
   expected: number | null,
-  currentUpdatedAt: Date
+  currentUpdatedAt: Date,
+  precision: VersionPrecision = "ms"
 ): void {
   if (expected === null) return;
-  const currentSec = Math.floor(currentUpdatedAt.getTime() / 1000);
-  const expectedSec = Math.floor(expected / 1000);
-  if (currentSec !== expectedSec) {
+
+  const current = currentUpdatedAt.getTime();
+
+  if (precision === "second") {
+    const currentSec = Math.floor(current / 1000);
+    const expectedSec = Math.floor(expected / 1000);
+    if (currentSec !== expectedSec) {
+      throw ApiError.conflict(
+        "The record was modified since you last loaded it. Refresh and try again."
+      );
+    }
+    return;
+  }
+
+  if (current !== expected) {
     throw ApiError.conflict(
       "The record was modified since you last loaded it. Refresh and try again."
     );

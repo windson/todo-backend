@@ -17,13 +17,28 @@ export const SESSION_MAX_AGE = 60 * 60 * 24 * 7;
 const BCRYPT_ROUNDS = 10;
 
 /**
- * Secret used to sign/verify session tokens. A dev default keeps the build and
- * tests green without secrets; production MUST set JWT_SECRET.
+ * Dev-only fallback secret. Used solely when JWT_SECRET is unset outside of
+ * production so the build and test suite stay green without configuration.
+ */
+const DEV_SECRET = "dev-insecure-secret-change-me-in-production";
+
+/**
+ * Secret used to sign/verify session tokens. In production a missing
+ * JWT_SECRET fails loudly rather than silently signing tokens with the
+ * publicly-known dev default; outside production the dev default keeps the
+ * build and tests green without secrets.
  */
 function getSecret(): Uint8Array {
-  const secret =
-    process.env.JWT_SECRET ?? "dev-insecure-secret-change-me-in-production";
-  return new TextEncoder().encode(secret);
+  const configured = process.env.JWT_SECRET;
+  if (!configured) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "JWT_SECRET must be set in production. Refusing to sign session tokens with the insecure dev default."
+      );
+    }
+    return new TextEncoder().encode(DEV_SECRET);
+  }
+  return new TextEncoder().encode(configured);
 }
 
 export interface AuthTokenPayload {

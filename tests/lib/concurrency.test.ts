@@ -34,10 +34,32 @@ describe("assertUnmodified", () => {
     }
   });
 
-  it("tolerates sub-second differences (second precision for HTTP-date tokens)", () => {
+  it("tolerates sub-second differences for HTTP-date (second-precision) tokens", () => {
     const current2 = new Date("2024-01-01T00:00:00.500Z");
     const expectedSecondPrecision = new Date("2024-01-01T00:00:00.000Z").getTime();
-    expect(() => assertUnmodified(expectedSecondPrecision, current2)).not.toThrow();
+    expect(() =>
+      assertUnmodified(expectedSecondPrecision, current2, "second")
+    ).not.toThrow();
+  });
+
+  it("conflicts on a same-second body-token write (ms precision, the default)", () => {
+    // Two edits land in the same wall-clock second: the body field carries full
+    // ms precision so the stale write MUST still 409.
+    const current2 = new Date("2024-01-01T00:00:00.500Z");
+    const expectedBodyToken = new Date("2024-01-01T00:00:00.000Z").getTime();
+    try {
+      assertUnmodified(expectedBodyToken, current2);
+      throw new Error("expected a conflict");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).statusCode).toBe(409);
+    }
+  });
+
+  it("conflicts on a same-second body-token write when precision is explicit ms", () => {
+    const current2 = new Date("2024-01-01T00:00:00.999Z");
+    const expectedBodyToken = new Date("2024-01-01T00:00:00.001Z").getTime();
+    expect(() => assertUnmodified(expectedBodyToken, current2, "ms")).toThrow(ApiError);
   });
 });
 

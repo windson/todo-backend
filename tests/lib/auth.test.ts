@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import {
   hashPassword,
@@ -35,6 +35,46 @@ describe("session tokens", () => {
 
   it("returns null for a malformed token", async () => {
     expect(await verifyToken("not-a-real-token")).toBeNull();
+  });
+});
+
+describe("JWT secret resolution", () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalSecret = process.env.JWT_SECRET;
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) {
+      delete (process.env as Record<string, string | undefined>).NODE_ENV;
+    } else {
+      (process.env as Record<string, string | undefined>).NODE_ENV = originalNodeEnv;
+    }
+    if (originalSecret === undefined) {
+      delete process.env.JWT_SECRET;
+    } else {
+      process.env.JWT_SECRET = originalSecret;
+    }
+  });
+
+  it("fails loudly in production when JWT_SECRET is unset", async () => {
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+    delete process.env.JWT_SECRET;
+    await expect(
+      createToken({ userId: "user-1", email: "a@b.com" })
+    ).rejects.toThrow(/JWT_SECRET must be set in production/);
+  });
+
+  it("uses the configured secret in production when JWT_SECRET is set", async () => {
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+    process.env.JWT_SECRET = "a-real-production-secret";
+    const token = await createToken({ userId: "user-1", email: "a@b.com" });
+    expect(await verifyToken(token)).not.toBeNull();
+  });
+
+  it("falls back to the dev default outside production (build/tests stay green)", async () => {
+    (process.env as Record<string, string | undefined>).NODE_ENV = "test";
+    delete process.env.JWT_SECRET;
+    const token = await createToken({ userId: "user-1", email: "a@b.com" });
+    expect(await verifyToken(token)).not.toBeNull();
   });
 });
 
