@@ -49,10 +49,18 @@ phases:
       - ARTIFACT_KEY="todo-backend/${CODEBUILD_RESOLVED_SOURCE_VERSION}.zip"
       - zip -r -q app.zip .next public node_modules package.json next.config.ts prisma
       - aws s3 cp app.zip "s3://${ARTIFACT_BUCKET}/${ARTIFACT_KEY}"
-      # Emit the artifact key so the deploy step can pass it to the app stack.
-      - echo "{\"ArtifactObjectKey\":\"${ARTIFACT_KEY}\"}" > artifact.json
+      # Print ONLY the artifact key (not any secret) so an operator can copy it
+      # from the build log into the `app` stack's ArtifactObjectKey parameter.
+      # The .zip itself is already uploaded above via `aws s3 cp`; this line is
+      # the single value the manual cutover step needs.
+      - echo "ArtifactObjectKey=${ARTIFACT_KEY}"
 
-artifacts:
-  files:
-    - artifact.json
-    - infra/appspec.yaml
+# NOTE: there is intentionally NO top-level `artifacts:` block. The CodeBuild
+# project in infra/cloudformation/pipeline.yaml sets `Artifacts: NO_ARTIFACTS`
+# (there is no CodePipeline/S3 output wiring consuming a CodeBuild artifact),
+# so any `artifacts:` block here would be discarded by CodeBuild and would
+# falsely imply an automated artifact handoff that does not exist. The built
+# .zip is published explicitly by the `aws s3 cp` above, and the resulting
+# object key is surfaced on the `ArtifactObjectKey=` log line for the operator
+# to pass by hand into the `app` stack. See infra/README.md ("CodeBuild +
+# CodeDeploy flow") and infra/CUTOVER.md for the manual build -> cutover handoff.

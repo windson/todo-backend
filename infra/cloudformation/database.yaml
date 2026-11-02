@@ -26,7 +26,14 @@ Parameters:
   EngineVersion:
     Type: String
     Default: "16.6"
-    Description: Aurora PostgreSQL engine version (PostgreSQL 16 line, matching docker-compose postgres:16).
+    Description: >-
+      Aurora PostgreSQL engine version (PostgreSQL 16 line, matching
+      docker-compose postgres:16). The exact offered patch version varies by
+      region and changes over time; confirm an offered value before deploying
+      with:
+      `aws rds describe-db-engine-versions --engine aurora-postgresql
+      --query "DBEngineVersions[?starts_with(EngineVersion,'16.')].EngineVersion"`
+      and override this parameter if 16.6 is not offered in your region.
   MinCapacity:
     Type: Number
     Default: 0.5
@@ -124,22 +131,32 @@ Resources:
       MonitoringRoleArn: !GetAtt MonitoringRole.Arn
 
   # Application JWT signing secret. Generated once; never plaintext in template.
+  # ROTATION: deliberately NOT auto-rotated. Unlike the Aurora master secret
+  # (which has a built-in Secrets Manager rotation strategy), JWT_SECRET is an
+  # application signing key with no managed HostedRotationLambda strategy;
+  # rotating it requires a dual-key grace window in the app so in-flight tokens
+  # stay valid. Rotation is therefore an application-level change deferred to a
+  # follow-up, not configured here. See infra/README.md ("Secret rotation").
   JwtSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
       Name: !Sub "${AWS::StackName}/jwt-secret"
-      Description: JWT signing secret for the todo-backend API (JWT_SECRET).
+      Description: JWT signing secret for the todo-backend API (JWT_SECRET). Rotation deferred (see infra/README.md).
       KmsKeyId: !Ref DataKmsKey
       GenerateSecretString:
         PasswordLength: 48
         ExcludePunctuation: true
 
   # Shared secret for the reminder dispatch endpoint (X-Dispatch-Secret header).
+  # ROTATION: deliberately NOT auto-rotated (same reasoning as JwtSecret above);
+  # this is a shared signing/auth secret, not DB credentials, so there is no
+  # managed rotation strategy. Rotation is deferred to a follow-up and documented
+  # in infra/README.md ("Secret rotation").
   ReminderDispatchSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
       Name: !Sub "${AWS::StackName}/reminder-dispatch-secret"
-      Description: Shared secret for POST /api/reminders/dispatch (REMINDER_DISPATCH_SECRET).
+      Description: Shared secret for POST /api/reminders/dispatch (REMINDER_DISPATCH_SECRET). Rotation deferred (see infra/README.md).
       KmsKeyId: !Ref DataKmsKey
       GenerateSecretString:
         PasswordLength: 48

@@ -192,7 +192,7 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-EndpointDomainName"
   RevisionId:
-    Description: The current Web Function revision id (used by appspec cutover).
+    Description: The current Web Function revision id (see infra/CUTOVER.md for the RevisionWeights cutover).
     Value: !GetAtt WebFunctionRevision.RevisionId
     Export:
       Name: !Sub "${AWS::StackName}-RevisionId"

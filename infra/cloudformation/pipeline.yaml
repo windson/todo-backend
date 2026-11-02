@@ -1,11 +1,16 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  todo-backend CI/CD: an encrypted, TLS-only, public-access-blocked S3 artifact
-  bucket; a CodeBuild project that runs infra/buildspec.yml (npm ci -> prisma
-  generate -> next build -> prisma migrate deploy -> zip -> s3 cp); and a
-  CodeDeploy application (ComputePlatform Lambda) with least-privilege roles.
-  No plaintext secrets: CodeBuild reads the Aurora master secret at migrate time
-  via secretsmanager:GetSecretValue on the specific secret ARN only.
+  todo-backend delivery building blocks (NOT an automated end-to-end pipeline):
+  an encrypted, TLS-only, public-access-blocked S3 artifact bucket; a CodeBuild
+  project that runs infra/buildspec.yml (npm ci -> prisma generate -> next build
+  -> prisma migrate deploy -> zip -> s3 cp); and a CodeDeploy application
+  (ComputePlatform Lambda) kept as a placeholder primitive for a future classic
+  AWS::Lambda::Function alias path. There is no AWS::CodePipeline and no
+  CodeDeploy DeploymentGroup: the build -> cutover handoff is a manual
+  `cloudformation deploy` of the app stack (see infra/CUTOVER.md and the honest
+  note on CodeDeployApplication below). No plaintext secrets: CodeBuild reads the
+  Aurora master secret at migrate time via secretsmanager:GetSecretValue on the
+  specific secret ARN only.
 
 Parameters:
   DatabaseStackName:
@@ -251,6 +256,17 @@ Resources:
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSCodeDeployRoleForLambda"
 
+  # HONEST NOTE: this CodeDeploy application is a PLACEHOLDER primitive, not an
+  # active deployment controller. It has no AWS::CodeDeploy::DeploymentGroup and
+  # nothing invokes a CodeDeploy deployment. Lambda Web Functions shift traffic
+  # NATIVELY via the endpoint's RevisionWeights (see app.yaml and
+  # infra/CUTOVER.md); classic CodeDeploy Lambda deployment groups operate on
+  # the alias of a traditional AWS::Lambda::Function and cannot drive a
+  # WebFunctionEndpoint. The application is provisioned so a future classic
+  # AWS::Lambda::Function alias path can attach a deployment group to it without
+  # re-plumbing; today the cutover is a manual `cloudformation deploy` of the
+  # app stack. It is retained to satisfy the "use CodeDeploy" requirement
+  # explicitly and transparently, not to imply an automated handoff.
   CodeDeployApplication:
     Type: AWS::CodeDeploy::Application
     Properties:
