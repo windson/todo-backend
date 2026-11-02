@@ -1,0 +1,58 @@
+# CodeBuild buildspec for todo-backend (Lambda Web Function).
+#
+# SAFETY: This buildspec NEVER dumps the whole environment. There is no
+# `printenv`, bare `env`, `set -x`/`set +x`, or any process-wide variable dump.
+# Each step references ONLY the specific variables it needs. The Aurora master
+# password is read from Secrets Manager at the single migrate step and is never
+# echoed. DATABASE_URL is assembled in-process and never printed.
+#
+# Variables supplied by the CodeBuild project (infra/cloudformation/pipeline.yaml):
+#   ARTIFACT_BUCKET   - S3 bucket the built .zip is uploaded to
+#   AURORA_SECRET_ARN - ARN of the RDS-managed master credentials secret
+#   DB_HOST           - Aurora cluster writer endpoint
+#   DB_PORT           - Aurora port (5432)
+#   DB_NAME           - initial database name
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 24
+    commands:
+      # Install exact dependencies from the lockfile only.
+      - npm ci
+
+  pre_build:
+    commands:
+      # Generate the Prisma client (the `build` script also does this, but doing
+      # it here fails fast if the schema is broken).
+      - npx prisma generate
+
+  build:
+    commands:
+      # Production build: `prisma generate` + `next build`.
+      - npm run build
+      # Assemble DATABASE_URL from the Aurora master secret for the migration.
+      # Only the two JSON keys we need are extracted; the secret is never logged.
+      - export DB_USER="$(aws secretsmanager get-secret-value --secret-id "$AURORA_SECRET_ARN" --query SecretString --output text | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).username))')"
+      - export DB_PASS="$(aws secretsmanager get-secret-value --secret-id "$AURORA_SECRET_ARN" --query SecretString --output text | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(encodeURIComponent(JSON.parse(s).password)))')"
+      - export DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
+      # Apply committed migrations to Aurora. NOTE: for a PRE-POPULATED database,
+      # the multi-tenancy userId backfill caveat in README.md applies - do not
+      # run an unedited generated migration that adds a non-nullable userId.
+      - npx prisma migrate deploy
+
+  post_build:
+    commands:
+      # Package only what the Web Function runtime needs. `next start` serves
+      # the build output; prisma/ is included for the generated client + schema.
+      - ARTIFACT_KEY="todo-backend/${CODEBUILD_RESOLVED_SOURCE_VERSION}.zip"
+      - zip -r -q app.zip .next public node_modules package.json next.config.ts prisma
+      - aws s3 cp app.zip "s3://${ARTIFACT_BUCKET}/${ARTIFACT_KEY}"
+      # Emit the artifact key so the deploy step can pass it to the app stack.
+      - echo "{\"ArtifactObjectKey\":\"${ARTIFACT_KEY}\"}" > artifact.json
+
+artifacts:
+  files:
+    - artifact.json
+    - infra/appspec.yaml

@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  todo-backend networking: a VPC with two private isolated subnets across two
+  Availability Zones for the Aurora PostgreSQL Serverless v2 cluster, plus the
+  two security groups that wire the Lambda Web Function VPC network-connector to
+  Aurora on port 5432. No public subnets, NAT, or internet gateway are created:
+  the Web Function reaches Aurora over the Lambda-managed network connector ENIs,
+  and the application needs no public egress from the database tier.
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: "10.42.0.0/16"
+    AllowedPattern: "^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$"
+    Description: CIDR block for the VPC.
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: "10.42.1.0/24"
+    AllowedPattern: "^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$"
+    Description: CIDR block for the first private subnet (AZ 1).
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: "10.42.2.0/24"
+    AllowedPattern: "^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$"
+    Description: CIDR block for the second private subnet (AZ 2).
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-vpc"
+
+  # Flow logs give audit visibility into the otherwise-private VPC (cfn-guard
+  # VPC_FLOW_LOGS_ENABLED). Logs land in CloudWatch via a dedicated role.
+  FlowLogLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vpc/${AWS::StackName}-flowlogs"
+      RetentionInDays: 365
+
+  FlowLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: flowlog-write
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !GetAtt FlowLogLogGroup.Arn
+
+  VpcFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceId: !Ref Vpc
+      ResourceType: VPC
+      TrafficType: ALL
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref FlowLogLogGroup
+      DeliverLogsPermissionArn: !GetAtt FlowLogRole.Arn
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-1"
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-2"
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-rt"
+
+  PrivateSubnet1RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # SG attached to the Lambda Web Function network-connector ENIs. It needs no
+  # ingress; its egress to Aurora is authorized by the Aurora SG ingress rule
+  # that references this group.
+  WebFunctionConnectorSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Lambda Web Function VPC network connector ENIs.
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          DestinationSecurityGroupId: !Ref AuroraSg
+          Description: Allow PostgreSQL egress to the Aurora cluster.
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-webfn-connector-sg"
+
+  # SG attached to the Aurora cluster. Only the Web Function connector SG may
+  # reach 5432; there is no open-CIDR ingress.
+  AuroraSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the Aurora PostgreSQL cluster.
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: "127.0.0.1/32"
+          Description: No egress required from the database tier.
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-aurora-sg"
+
+  AuroraIngressFromConnector:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AuroraSg
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref WebFunctionConnectorSg
+      Description: Allow PostgreSQL ingress from the Web Function connector SG only.
+
+Outputs:
+  VpcId:
+    Description: The VPC id.
+    Value: !Ref Vpc
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcId"
+  PrivateSubnetIds:
+    Description: Comma-separated private subnet ids for the DB subnet group and network connector.
+    Value: !Join [",", [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetIds"
+  AuroraSgId:
+    Description: Security group id for the Aurora cluster.
+    Value: !Ref AuroraSg
+    Export:
+      Name: !Sub "${AWS::StackName}-AuroraSgId"
+  WebFunctionConnectorSgId:
+    Description: Security group id for the Web Function VPC network connector.
+    Value: !Ref WebFunctionConnectorSg
+    Export:
+      Name: !Sub "${AWS::StackName}-WebFunctionConnectorSgId"

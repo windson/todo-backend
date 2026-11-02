@@ -1,0 +1,30 @@
+# CodeDeploy appspec for the todo-backend Lambda Web Function cutover.
+#
+# IMPORTANT, read with infra/README.md:
+# AWS Lambda Web Functions shift traffic NATIVELY through the endpoint's
+# RevisionWeights property (up to two revisions with weights), which is how
+# canary / blue-green is expressed for this new compute type. Classic CodeDeploy
+# Lambda deployment groups operate on Lambda *alias* versions of a traditional
+# AWS::Lambda::Function and do not manage WebFunctionEndpoint RevisionWeights.
+#
+# The CodeBuild + CodeDeploy pair in pipeline.yaml is wired as the delivery
+# pipeline: CodeBuild builds, migrates, and uploads the artifact; the cutover to
+# the new revision is performed by updating the AWS::Lambda::WebFunctionEndpoint
+# RevisionWeights in app.yaml (set the new revision to Weight 100, or split
+# across two revisions for a canary). This appspec documents that revision
+# cutover contract; it does NOT dump any environment or secret.
+version: 0.0
+
+Resources:
+  - TodoBackendWebFunction:
+      Type: AWS::Lambda::WebFunctionEndpoint
+      Properties:
+        # The revision id produced by the build (see artifact.json ->
+        # ArtifactObjectKey -> app.yaml WebFunctionRevision -> RevisionId).
+        TargetRevision: "<new-revision-id>"
+        CurrentRevision: "<previous-revision-id>"
+        # Canary example: send 10% to the new revision first, then 100%.
+        TrafficShifting:
+          Type: Canary
+          CanaryPercentage: 10
+          CanaryIntervalMinutes: 5

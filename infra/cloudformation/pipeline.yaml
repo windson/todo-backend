@@ -1,0 +1,280 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  todo-backend CI/CD: an encrypted, TLS-only, public-access-blocked S3 artifact
+  bucket; a CodeBuild project that runs infra/buildspec.yml (npm ci -> prisma
+  generate -> next build -> prisma migrate deploy -> zip -> s3 cp); and a
+  CodeDeploy application (ComputePlatform Lambda) with least-privilege roles.
+  No plaintext secrets: CodeBuild reads the Aurora master secret at migrate time
+  via secretsmanager:GetSecretValue on the specific secret ARN only.
+
+Parameters:
+  DatabaseStackName:
+    Type: String
+    Description: Name of the database stack (exports Aurora endpoint + master secret ARN for migrate).
+  SourceRepositoryUrl:
+    Type: String
+    Default: "https://github.com/windson/todo-backend.git"
+    Description: Git source cloned by CodeBuild.
+  SourceBranch:
+    Type: String
+    Default: "feat/aws-iac-cicd"
+    Description: Git branch CodeBuild builds from.
+
+Resources:
+  ArtifactKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "KMS key for ${AWS::StackName} build artifacts."
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableRootAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  # Server-access log bucket for the artifact bucket (S3_BUCKET_LOGGING_ENABLED).
+  # It does not log to itself (that would recurse); this is the standard terminal
+  # log-bucket pattern.
+  AccessLogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-logs
+            Status: Enabled
+            ExpirationInDays: 90
+
+  AccessLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt AccessLogBucket.Arn
+              - !Sub "${AccessLogBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+          - Sid: AllowS3LogDelivery
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action: "s3:PutObject"
+            Resource: !Sub "${AccessLogBucket.Arn}/*"
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref ArtifactKmsKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LoggingConfiguration:
+        DestinationBucketName: !Ref AccessLogBucket
+        LogFilePrefix: artifact-access/
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-noncurrent
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  # Deny any non-TLS access to the bucket (cfn-guard S3 secure-transport rule).
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Sub "${ArtifactBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+  CodeBuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${AWS::StackName}"
+      RetentionInDays: 365
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${CodeBuildLogGroup.Arn}:*"
+        - PolicyName: artifacts
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub "${ArtifactBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource: !GetAtt ArtifactBucket.Arn
+              - Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                Resource: !GetAtt ArtifactKmsKey.Arn
+        - PolicyName: read-db-secret-for-migrate
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # CodeBuild reads ONLY the Aurora master secret to assemble
+              # DATABASE_URL for `prisma migrate deploy`. No broad secret access.
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  Fn::ImportValue: !Sub "${DatabaseStackName}-MasterUserSecretArn"
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-build"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Source:
+        Type: GITHUB
+        Location: !Ref SourceRepositoryUrl
+        BuildSpec: infra/buildspec.yml
+      SourceVersion: !Ref SourceBranch
+      Artifacts:
+        Type: NO_ARTIFACTS
+      EncryptionKey: !GetAtt ArtifactKmsKey.Arn
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref CodeBuildLogGroup
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        # Only the specific variables each build step needs are declared here.
+        # The buildspec never dumps the full environment (no printenv/env/set).
+        EnvironmentVariables:
+          - Name: ARTIFACT_BUCKET
+            Type: PLAINTEXT
+            Value: !Ref ArtifactBucket
+          - Name: AURORA_SECRET_ARN
+            Type: PLAINTEXT
+            Value:
+              Fn::ImportValue: !Sub "${DatabaseStackName}-MasterUserSecretArn"
+          - Name: DB_HOST
+            Type: PLAINTEXT
+            Value:
+              Fn::ImportValue: !Sub "${DatabaseStackName}-ClusterEndpoint"
+          - Name: DB_PORT
+            Type: PLAINTEXT
+            Value:
+              Fn::ImportValue: !Sub "${DatabaseStackName}-ClusterPort"
+          - Name: DB_NAME
+            Type: PLAINTEXT
+            Value:
+              Fn::ImportValue: !Sub "${DatabaseStackName}-DatabaseName"
+
+  CodeDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSCodeDeployRoleForLambda"
+
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: !Sub "${AWS::StackName}-app"
+      ComputePlatform: Lambda
+
+Outputs:
+  ArtifactBucketName:
+    Description: Name of the build artifact bucket.
+    Value: !Ref ArtifactBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-ArtifactBucketName"
+  ArtifactKmsKeyArn:
+    Description: ARN of the artifact KMS key.
+    Value: !GetAtt ArtifactKmsKey.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ArtifactKmsKeyArn"
+  CodeBuildProjectName:
+    Description: Name of the CodeBuild project.
+    Value: !Ref CodeBuildProject
+    Export:
+      Name: !Sub "${AWS::StackName}-CodeBuildProjectName"
+  CodeDeployApplicationName:
+    Description: Name of the CodeDeploy application.
+    Value: !Ref CodeDeployApplication
+    Export:
+      Name: !Sub "${AWS::StackName}-CodeDeployApplicationName"
