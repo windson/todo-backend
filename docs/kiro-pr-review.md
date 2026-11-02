@@ -29,3 +29,23 @@ gh workflow run "Kiro PR Review" --repo windson/todo-backend -f pr_number=1
 ```
 
 Each actionable finding is attached to its file and line in the pull request diff. A later run replaces prior Kiro inline comments, and a clean review posts no summary comment.
+## Custom GitHub App identity
+
+The workflow creates a short-lived installation token from `KIRO_REVIEWER_APP_ID` and `KIRO_REVIEWER_PRIVATE_KEY`. Inline findings are therefore authored by `kiro-pr-reviewer[bot]` rather than `github-actions[bot]`. The GitHub App must be installed on this repository with read/write access to contents and pull requests.
+
+## Applying findings
+
+Maintainers with `write`, `maintain`, or `admin` permission can request fixes from the PR conversation:
+
+```text
+@kiro-pr-reviewer fix all
+@kiro-pr-reviewer fix discussion_r4443586283
+```
+
+A maintainer can also reply directly to a current Kiro inline finding:
+
+```text
+@kiro-pr-reviewer fix this
+```
+
+The fixer accepts only same-repository PR branches. Kiro receives read-only tools and returns exact replacements for a trusted script to apply. The script rejects workflow, agent, Git, environment, credential, key, and lockfile edits; limits each run to 20 replacements and 2,000 changed lines; verifies the PR head has not changed; and pushes a normal commit through the GitHub App. That push triggers a fresh Kiro review.

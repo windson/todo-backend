@@ -12,7 +12,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: kiro-pr-review-${{ github.event.pull_request.number || inputs.pr_number }}
@@ -131,12 +131,21 @@ jobs:
             "$RUNNER_TEMP/kiro-review.json" \
             --exit-code "$cli_status"
 
+      - name: Generate reviewer bot token
+        id: reviewer-token
+        if: steps.kiro.outcome == 'success'
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          app-id: ${{ vars.KIRO_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.KIRO_REVIEWER_PRIVATE_KEY }}
+
       - name: Create inline review comments
         if: steps.kiro.outcome == 'success' && steps.pr.outputs.number != ''
         uses: actions/github-script@v9.0.0
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         with:
+          github-token: ${{ steps.reviewer-token.outputs.token }}
           script: |
             const fs = require('fs');
             const marker = '<!-- kiro-inline-review -->';
