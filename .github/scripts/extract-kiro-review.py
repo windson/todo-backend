@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 MAX_COMMENT_CHARS = 60_000
@@ -58,6 +59,10 @@ def main() -> int:
         )
         args.output.write_text(message + "\n", encoding="utf-8")
         return 1
+
+    finding_headers = list(re.finditer(r"(?m)^## Findings\s*$", final_text))
+    if finding_headers:
+        final_text = final_text[finding_headers[-1].start() :]
 
     if len(final_text) > MAX_COMMENT_CHARS:
         final_text = (
