@@ -39,7 +39,7 @@ Maintainers with `write`, `maintain`, or `admin` permission can request fixes fr
 
 ```text
 @kiro-pr-reviewer fix all
-@kiro-pr-reviewer fix discussion_r4443586283
+@kiro-pr-reviewer fix discussion_r<ID>
 ```
 
 A maintainer can also reply directly to a current Kiro inline finding:
