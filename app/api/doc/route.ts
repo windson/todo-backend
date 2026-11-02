@@ -94,9 +94,13 @@ const openApiSpec = {
         responses: {
           "200": {
             description: "List of todos",
-            headers: { "X-Total-Count": { schema: { type: "integer" }, description: "Total number of matching todos" } },
+            headers: {
+              "X-Total-Count": { schema: { type: "integer" }, description: "Total number of matching todos" },
+              "Link": { schema: { type: "string" }, description: "RFC 5988 pagination links (first/prev/next/last) preserving the current filters. CORS-exposed." },
+            },
             content: { "application/json": { schema: { $ref: "#/components/schemas/TodoListResponse" } } },
           },
+          "429": { description: "Too many requests (rate limited)", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
         },
       },
       post: {
@@ -125,7 +129,11 @@ const openApiSpec = {
       patch: {
         summary: "Update a todo",
         tags: ["Todos"],
-        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        description: "Update a todo. Supports optimistic concurrency: send the todo's last-seen updatedAt either as the `expectedUpdatedAt` body field (ISO date-time) or via the `If-Unmodified-Since` request header. When provided and the todo has changed since, the request is rejected with 409. Omitting the token keeps the previous unconditional update behavior.",
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "If-Unmodified-Since", in: "header", required: false, schema: { type: "string", format: "http-date" }, description: "Optimistic-concurrency token: the todo's last-seen updatedAt as an HTTP date. Alternative to the expectedUpdatedAt body field." },
+        ],
         requestBody: {
           required: true,
           content: { "application/json": { schema: { $ref: "#/components/schemas/UpdateTodo" } } },
@@ -134,6 +142,8 @@ const openApiSpec = {
           "200": { description: "Updated todo", content: { "application/json": { schema: { $ref: "#/components/schemas/TodoResponse" } } } },
           "400": { description: "Validation error" },
           "404": { description: "Todo not found" },
+          "409": { description: "Conflict - the todo was modified since the client's expectedUpdatedAt/If-Unmodified-Since token", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+          "429": { description: "Too many requests (rate limited)", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
         },
       },
       delete: {
@@ -410,7 +420,14 @@ const openApiSpec = {
           { name: "offset", in: "query", required: false, schema: { type: "integer", minimum: 0 } },
         ],
         responses: {
-          "200": { description: "List of notifications", content: { "application/json": { schema: { $ref: "#/components/schemas/NotificationListResponse" } } } },
+          "200": {
+            description: "List of notifications",
+            headers: {
+              "X-Total-Count": { schema: { type: "integer" }, description: "Total number of matching notifications" },
+              "Link": { schema: { type: "string" }, description: "RFC 5988 pagination links (first/prev/next/last) when a limit is supplied. CORS-exposed." },
+            },
+            content: { "application/json": { schema: { $ref: "#/components/schemas/NotificationListResponse" } } },
+          },
         },
       },
     },
@@ -849,6 +866,7 @@ const openApiSpec = {
           assigneeId: { type: "string", nullable: true, description: "Assign the todo to a user (owner or shared user), or null to unassign" },
           order: { type: "integer" },
           tagIds: { type: "array", items: { type: "string" } },
+          expectedUpdatedAt: { type: "string", format: "date-time", description: "Optimistic-concurrency token: the todo's last-seen updatedAt. When provided and the todo changed since, the update returns 409. Alternative to the If-Unmodified-Since header. Optional (backward compatible)." },
         },
       },
       PublicUser: {

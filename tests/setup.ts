@@ -7,3 +7,9 @@
  */
 process.env.DATABASE_URL ??=
   "postgresql://todouser:todopass@localhost:5432/tododb";
+
+// Keep test output clean: silence the structured per-request logger (FEAT-010)
+// unless a test explicitly re-enables it. Rate limiting stays disabled by
+// default (RATE_LIMIT_ENABLED unset) so the many-requests test suite is not
+// throttled; the rate-limit tests opt in and reset the limiter themselves.
+process.env.REQUEST_LOG_ENABLED ??= "false";

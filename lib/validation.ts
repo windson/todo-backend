@@ -34,6 +34,11 @@ export const UpdateTodoSchema = z.object({
   assigneeId: z.string().nullable().optional(),
   order: z.number().int().optional(),
   tagIds: z.array(z.string()).optional(),
+  // Optimistic concurrency (FEAT-010). When provided, the update is only
+  // applied if the todo's current updatedAt matches this value; otherwise the
+  // handler returns 409. Optional, so omitting it preserves the previous
+  // (unconditional) update behavior. Accepts an ISO date-time string.
+  expectedUpdatedAt: z.coerce.date().optional(),
 });
 
 export const CreateCategorySchema = z.object({

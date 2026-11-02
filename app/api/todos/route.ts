@@ -8,11 +8,16 @@ import { formatTodo, todoInclude } from "@/lib/todo-format";
 import { buildDueDateFilter } from "@/lib/todo-filters";
 import { logActivity, ActivityAction } from "@/lib/activity";
 import { accessibleTodoWhere } from "@/lib/todo-access";
+import { paginationHeaders } from "@/lib/pagination";
+import { logRequest } from "@/lib/request-log";
 import { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
+  let currentUserId: string | null = null;
   try {
     const { userId } = await requireUser(request);
+    currentUserId = userId;
     const { searchParams } = new URL(request.url);
     const params = Object.fromEntries(searchParams.entries());
 
@@ -129,12 +134,36 @@ export async function GET(request: NextRequest) {
 
     const formattedTodos = todos.map((todo) => formatTodo(todo));
 
-    return successResponse(formattedTodos, 200, {
-      "X-Total-Count": totalCount.toString(),
+    // Emit X-Total-Count plus RFC 5988 Link headers (first/prev/next/last) so
+    // clients can navigate pages without recomputing offsets. Both are
+    // CORS-exposed via middleware.
+    const headers = paginationHeaders({
+      url: request.url,
+      limit,
+      offset,
+      total: totalCount,
     });
+
+    const response = successResponse(formattedTodos, 200, headers);
+    logRequest({
+      method: "GET",
+      path: "/api/todos",
+      status: 200,
+      durationMs: Math.round(Date.now() - startedAt),
+      userId: currentUserId,
+    });
+    return response;
   } catch (error) {
-    if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    const response =
+      error instanceof ApiError ? errorResponse(error) : errorResponse(ApiError.internal());
+    logRequest({
+      method: "GET",
+      path: "/api/todos",
+      status: response.status,
+      durationMs: Math.round(Date.now() - startedAt),
+      userId: currentUserId,
+    });
+    return response;
   }
 }
 

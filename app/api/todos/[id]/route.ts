@@ -9,6 +9,8 @@ import { generateNextOccurrence } from "@/lib/recurrence-service";
 import { logActivity, ActivityAction } from "@/lib/activity";
 import { requireTodoRead, requireTodoWrite, requireTodoManage, isAssigneeAllowed } from "@/lib/todo-access";
 import { notifyAssigned } from "@/lib/collaboration-notify";
+import { assertUnmodified, resolveExpectedVersionFromHeader } from "@/lib/concurrency";
+import { logRequest } from "@/lib/request-log";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -43,8 +45,11 @@ export async function PATCH(
   request: NextRequest,
   context: RouteContext
 ) {
+  const startedAt = Date.now();
+  let currentUserId: string | null = null;
   try {
     const { userId } = await requireUser(request);
+    currentUserId = userId;
     const { id } = await context.params;
     const body = await request.json();
     const parsed = UpdateTodoSchema.safeParse(body);
@@ -68,7 +73,17 @@ export async function PATCH(
       throw ApiError.notFound("Todo not found");
     }
 
-    const { tagIds, ...updateData } = parsed.data;
+    const { tagIds, expectedUpdatedAt, ...updateData } = parsed.data;
+
+    // Optimistic concurrency: when the client sends expectedUpdatedAt (via the
+    // validated body field) OR an If-Unmodified-Since header, reject with 409
+    // if the todo changed since. Backward compatible: with no token the update
+    // proceeds unconditionally as before.
+    const expectedVersion =
+      expectedUpdatedAt !== undefined
+        ? expectedUpdatedAt.getTime()
+        : resolveExpectedVersionFromHeader(request);
+    assertUnmodified(expectedVersion, existing.updatedAt);
 
     // Category, parent, and tags belong to the todo's OWNER's space, so they
     // are validated against ownerId (an editor edits within the owner's data).
@@ -208,10 +223,26 @@ export async function PATCH(
       }
     }
 
-    return successResponse(formatTodo(todo));
+    const response = successResponse(formatTodo(todo));
+    logRequest({
+      method: "PATCH",
+      path: "/api/todos/[id]",
+      status: 200,
+      durationMs: Math.round(Date.now() - startedAt),
+      userId: currentUserId,
+    });
+    return response;
   } catch (error) {
-    if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    const response =
+      error instanceof ApiError ? errorResponse(error) : errorResponse(ApiError.internal());
+    logRequest({
+      method: "PATCH",
+      path: "/api/todos/[id]",
+      status: response.status,
+      durationMs: Math.round(Date.now() - startedAt),
+      userId: currentUserId,
+    });
+    return response;
   }
 }
 

@@ -4,6 +4,7 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { NotificationQueryParamsSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { paginationHeaders } from "@/lib/pagination";
 
 /**
  * List the authenticated user's notifications (newest first). Pass `read=false`
@@ -29,19 +30,29 @@ export async function GET(request: NextRequest) {
         : {}),
     };
 
+    // Defaults mirror the historical behavior: when the client omits limit the
+    // full result set is returned (take undefined). Link headers are only
+    // meaningful when a page size is supplied, so they are emitted when limit
+    // is present.
+    const limit = parsed.data.limit;
+    const offset = parsed.data.offset ?? 0;
+
     const [notifications, total] = await Promise.all([
       prisma.notification.findMany({
         where,
         orderBy: { createdAt: "desc" },
-        take: parsed.data.limit,
+        take: limit,
         skip: parsed.data.offset,
       }),
       prisma.notification.count({ where }),
     ]);
 
-    return successResponse(notifications, 200, {
-      "X-Total-Count": String(total),
-    });
+    const headers =
+      limit !== undefined
+        ? paginationHeaders({ url: request.url, limit, offset, total })
+        : { "X-Total-Count": String(total) };
+
+    return successResponse(notifications, 200, headers);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
     return errorResponse(ApiError.internal());
