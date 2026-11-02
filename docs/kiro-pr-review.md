@@ -31,7 +31,7 @@ gh workflow run "Kiro PR Review" --repo windson/todo-backend -f pr_number=1
 Each actionable finding is attached to its file and line in the pull request diff. A later run replaces prior Kiro inline comments, and a clean review posts no summary comment.
 ## Custom GitHub App identity
 
-The workflow creates a short-lived installation token from `KIRO_REVIEWER_APP_ID` and `KIRO_REVIEWER_PRIVATE_KEY`. Inline findings are therefore authored by `kiro-pr-reviewer[bot]` rather than `github-actions[bot]`. The GitHub App must be installed on this repository with read/write access to contents and pull requests.
+The workflow creates a short-lived installation token from `KIRO_REVIEWER_CLIENT_ID` and `KIRO_REVIEWER_PRIVATE_KEY`. Inline findings are therefore authored by `kiro-pr-reviewer[bot]` rather than `github-actions[bot]`. The GitHub App must be installed on this repository with read/write access to contents and pull requests.
 
 ## Applying findings
 

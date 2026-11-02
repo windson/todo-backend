@@ -142,7 +142,7 @@ jobs:
         if: steps.command.outputs.authorized == 'true'
         uses: actions/create-github-app-token@v3.3.0
         with:
-          app-id: ${{ vars.KIRO_REVIEWER_APP_ID }}
+          client-id: ${{ vars.KIRO_REVIEWER_CLIENT_ID }}
           private-key: ${{ secrets.KIRO_REVIEWER_PRIVATE_KEY }}
 
       - name: Check out trusted automation
