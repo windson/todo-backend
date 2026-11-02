@@ -3,6 +3,8 @@ name: Kiro PR Review
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
+  repository_dispatch:
+    types: [kiro-pr-review]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -15,12 +17,12 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: kiro-pr-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: kiro-pr-review-${{ github.event.pull_request.number || github.event.client_payload.pr_number || inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
   review:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -29,7 +31,7 @@ jobs:
         id: pr
         uses: actions/github-script@v9.0.0
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.client_payload.pr_number || inputs.pr_number }}
         with:
           script: |
             const prNumber = Number(process.env.PR_NUMBER);

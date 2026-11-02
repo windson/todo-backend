@@ -48,4 +48,4 @@ A maintainer can also reply directly to a current Kiro inline finding:
 @kiro-pr-reviewer fix this
 ```
 
-The fixer accepts only same-repository PR branches. Kiro receives read-only tools and returns exact replacements for a trusted script to apply. The script rejects workflow, agent, Git, environment, credential, key, and lockfile edits; limits each run to 20 replacements and 2,000 changed lines; verifies the PR head has not changed; and pushes a normal commit through the GitHub App. That push triggers a fresh Kiro review.
+The fixer accepts only same-repository PR branches. Kiro receives read-only tools and returns exact replacements for a trusted script to apply. The script rejects workflow, agent, Git, environment, credential, key, and lockfile edits; limits each run to 20 replacements and 2,000 changed lines; verifies the PR head has not changed; and pushes a normal commit through the GitHub App. The fixer then dispatches a fresh Kiro review so stale findings are replaced or removed.

@@ -256,3 +256,6 @@ jobs:
           git -C review-target push \
             "https://x-access-token:${APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "HEAD:${HEAD_REF}"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            -f event_type=kiro-pr-review \
+            -F "client_payload[pr_number]=$PR_NUMBER"
