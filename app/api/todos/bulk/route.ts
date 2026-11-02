@@ -3,9 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { BulkOperationSchema } from "@/lib/validation";
+import { requireUser } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
+    const { userId } = await requireUser(request);
     const body = await request.json();
     const parsed = BulkOperationSchema.safeParse(body);
 
@@ -18,7 +20,7 @@ export async function POST(request: NextRequest) {
     switch (operation) {
       case "complete": {
         const result = await prisma.todo.updateMany({
-          where: { id: { in: ids } },
+          where: { id: { in: ids }, userId },
           data: { completed: true },
         });
         return successResponse({
@@ -29,7 +31,7 @@ export async function POST(request: NextRequest) {
 
       case "uncomplete": {
         const result = await prisma.todo.updateMany({
-          where: { id: { in: ids } },
+          where: { id: { in: ids }, userId },
           data: { completed: false },
         });
         return successResponse({
@@ -40,7 +42,7 @@ export async function POST(request: NextRequest) {
 
       case "delete": {
         const result = await prisma.todo.deleteMany({
-          where: { id: { in: ids } },
+          where: { id: { in: ids }, userId },
         });
         return successResponse({
           message: `${result.count} todo(s) deleted`,

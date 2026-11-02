@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { UpdateTodoSchema } from "@/lib/validation";
+import { requireUser } from "@/lib/auth";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -11,10 +12,11 @@ export async function GET(
   context: RouteContext
 ) {
   try {
+    const { userId } = await requireUser(request);
     const { id } = await context.params;
 
-    const todo = await prisma.todo.findUnique({
-      where: { id },
+    const todo = await prisma.todo.findFirst({
+      where: { id, userId },
       include: {
         category: true,
         tags: { include: { tag: true } },
@@ -42,6 +44,7 @@ export async function PATCH(
   context: RouteContext
 ) {
   try {
+    const { userId } = await requireUser(request);
     const { id } = await context.params;
     const body = await request.json();
     const parsed = UpdateTodoSchema.safeParse(body);
@@ -50,7 +53,7 @@ export async function PATCH(
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const existing = await prisma.todo.findUnique({ where: { id } });
+    const existing = await prisma.todo.findFirst({ where: { id, userId } });
     if (!existing) {
       throw ApiError.notFound("Todo not found");
     }
@@ -58,11 +61,20 @@ export async function PATCH(
     const { tagIds, ...updateData } = parsed.data;
 
     if (updateData.categoryId) {
-      const category = await prisma.category.findUnique({
-        where: { id: updateData.categoryId },
+      const category = await prisma.category.findFirst({
+        where: { id: updateData.categoryId, userId },
       });
       if (!category) {
         throw ApiError.badRequest("Category not found");
+      }
+    }
+
+    if (tagIds && tagIds.length > 0) {
+      const tags = await prisma.tag.findMany({
+        where: { id: { in: tagIds }, userId },
+      });
+      if (tags.length !== tagIds.length) {
+        throw ApiError.badRequest("One or more tags not found");
       }
     }
 
@@ -100,9 +112,10 @@ export async function DELETE(
   context: RouteContext
 ) {
   try {
+    const { userId } = await requireUser(request);
     const { id } = await context.params;
 
-    const existing = await prisma.todo.findUnique({ where: { id } });
+    const existing = await prisma.todo.findFirst({ where: { id, userId } });
     if (!existing) {
       throw ApiError.notFound("Todo not found");
     }

@@ -1,11 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getTokenFromRequest, verifyToken } from "@/lib/auth";
 
 const ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://localhost:3000",
 ];
 
-export function middleware(request: NextRequest) {
+// Routes under /api that do NOT require authentication.
+const PUBLIC_API_PREFIXES = ["/api/auth", "/api/doc"];
+
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_API_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+}
+
+function applyCors(response: NextResponse, origin: string, isAllowedOrigin: boolean) {
+  if (isAllowedOrigin) {
+    response.headers.set("Access-Control-Allow-Origin", origin);
+  }
+  response.headers.set("Access-Control-Allow-Credentials", "true");
+  response.headers.set("Access-Control-Expose-Headers", "X-Total-Count");
+  return response;
+}
+
+export async function middleware(request: NextRequest) {
   const origin = request.headers.get("origin") ?? "";
   const isAllowedOrigin = ALLOWED_ORIGINS.includes(origin);
 
@@ -28,18 +47,28 @@ export function middleware(request: NextRequest) {
     return response;
   }
 
+  const { pathname } = request.nextUrl;
+
+  // Enforce authentication on protected API routes. /api/auth/* and /api/doc
+  // remain public.
+  if (!isPublicPath(pathname)) {
+    const token = getTokenFromRequest(request);
+    const user = token ? await verifyToken(token) : null;
+    if (!user) {
+      const response = NextResponse.json(
+        {
+          success: false,
+          error: { message: "Authentication required" },
+        },
+        { status: 401 }
+      );
+      return applyCors(response, origin, isAllowedOrigin);
+    }
+  }
+
   // Handle actual requests
   const response = NextResponse.next();
-  if (isAllowedOrigin) {
-    response.headers.set("Access-Control-Allow-Origin", origin);
-  }
-  response.headers.set("Access-Control-Allow-Credentials", "true");
-  response.headers.set(
-    "Access-Control-Expose-Headers",
-    "X-Total-Count"
-  );
-
-  return response;
+  return applyCors(response, origin, isAllowedOrigin);
 }
 
 export const config = {

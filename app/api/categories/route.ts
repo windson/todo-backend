@@ -3,10 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, createdResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { CreateCategorySchema } from "@/lib/validation";
+import { requireUser } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const { userId } = await requireUser(request);
     const categories = await prisma.category.findMany({
+      where: { userId },
       include: {
         _count: { select: { todos: true } },
       },
@@ -29,6 +32,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const { userId } = await requireUser(request);
     const body = await request.json();
     const parsed = CreateCategorySchema.safeParse(body);
 
@@ -36,15 +40,15 @@ export async function POST(request: NextRequest) {
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const existing = await prisma.category.findUnique({
-      where: { name: parsed.data.name },
+    const existing = await prisma.category.findFirst({
+      where: { userId, name: parsed.data.name },
     });
     if (existing) {
       throw ApiError.conflict("A category with this name already exists");
     }
 
     const category = await prisma.category.create({
-      data: parsed.data,
+      data: { ...parsed.data, userId },
     });
 
     return createdResponse(category);

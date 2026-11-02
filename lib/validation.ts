@@ -44,6 +44,17 @@ export const UpdateTagSchema = z.object({
   color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color").regex(/^#[0-9a-fA-F]{6}$/, "Color must be a valid hex color (e.g. #ff0000)").optional(),
 });
 
+export const SignupSchema = z.object({
+  email: z.email("A valid email is required").max(255),
+  password: z.string().min(8, "Password must be at least 8 characters").max(128, "Password must be 128 characters or less"),
+  name: z.string().min(1).max(100, "Name must be 100 characters or less").optional(),
+});
+
+export const LoginSchema = z.object({
+  email: z.email("A valid email is required"),
+  password: z.string().min(1, "Password is required"),
+});
+
 export const TodoQueryParamsSchema = z.object({
   search: z.string().optional(),
   completed: z.enum(["true", "false"]).optional(),
@@ -79,3 +90,5 @@ export type CreateTagInput = z.infer<typeof CreateTagSchema>;
 export type UpdateTagInput = z.infer<typeof UpdateTagSchema>;
 export type TodoQueryParams = z.infer<typeof TodoQueryParamsSchema>;
 export type BulkOperationInput = z.infer<typeof BulkOperationSchema>;
+export type SignupInput = z.infer<typeof SignupSchema>;
+export type LoginInput = z.infer<typeof LoginSchema>;

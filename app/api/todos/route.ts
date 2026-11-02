@@ -3,10 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, createdResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { CreateTodoSchema, TodoQueryParamsSchema } from "@/lib/validation";
+import { requireUser } from "@/lib/auth";
 import { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
   try {
+    const { userId } = await requireUser(request);
     const { searchParams } = new URL(request.url);
     const params = Object.fromEntries(searchParams.entries());
 
@@ -29,7 +31,7 @@ export async function GET(request: NextRequest) {
       offset = 0,
     } = parsed.data;
 
-    const where: Prisma.TodoWhereInput = {};
+    const where: Prisma.TodoWhereInput = { userId };
 
     if (search) {
       where.OR = [
@@ -102,6 +104,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const { userId } = await requireUser(request);
     const body = await request.json();
     const parsed = CreateTodoSchema.safeParse(body);
 
@@ -112,17 +115,27 @@ export async function POST(request: NextRequest) {
     const { tagIds, ...todoData } = parsed.data;
 
     if (todoData.categoryId) {
-      const category = await prisma.category.findUnique({
-        where: { id: todoData.categoryId },
+      const category = await prisma.category.findFirst({
+        where: { id: todoData.categoryId, userId },
       });
       if (!category) {
         throw ApiError.badRequest("Category not found");
       }
     }
 
+    if (tagIds && tagIds.length > 0) {
+      const tags = await prisma.tag.findMany({
+        where: { id: { in: tagIds }, userId },
+      });
+      if (tags.length !== tagIds.length) {
+        throw ApiError.badRequest("One or more tags not found");
+      }
+    }
+
     const todo = await prisma.todo.create({
       data: {
         ...todoData,
+        userId,
         tags: tagIds
           ? { create: tagIds.map((tagId) => ({ tagId })) }
           : undefined,

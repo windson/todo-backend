@@ -1,5 +1,6 @@
 import { PrismaClient, Priority } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import bcrypt from "bcryptjs";
 
 const adapter = new PrismaPg(process.env.DATABASE_URL!);
 const prisma = new PrismaClient({ adapter });
@@ -12,20 +13,33 @@ async function main() {
   await prisma.todo.deleteMany();
   await prisma.tag.deleteMany();
   await prisma.category.deleteMany();
+  await prisma.user.deleteMany();
+
+  // Create a demo user that owns all seeded data
+  const passwordHash = await bcrypt.hash("password123", 10);
+  const user = await prisma.user.create({
+    data: {
+      email: "demo@example.com",
+      passwordHash,
+      name: "Demo User",
+    },
+  });
+
+  console.log(`Created demo user ${user.email}`);
 
   // Create categories
   const categories = await Promise.all([
     prisma.category.create({
-      data: { name: "Work", color: "#3B82F6" },
+      data: { name: "Work", color: "#3B82F6", userId: user.id },
     }),
     prisma.category.create({
-      data: { name: "Personal", color: "#10B981" },
+      data: { name: "Personal", color: "#10B981", userId: user.id },
     }),
     prisma.category.create({
-      data: { name: "Shopping", color: "#F59E0B" },
+      data: { name: "Shopping", color: "#F59E0B", userId: user.id },
     }),
     prisma.category.create({
-      data: { name: "Health", color: "#EF4444" },
+      data: { name: "Health", color: "#EF4444", userId: user.id },
     }),
   ]);
 
@@ -34,16 +48,16 @@ async function main() {
   // Create tags
   const tags = await Promise.all([
     prisma.tag.create({
-      data: { name: "important", color: "#DC2626" },
+      data: { name: "important", color: "#DC2626", userId: user.id },
     }),
     prisma.tag.create({
-      data: { name: "quick-win", color: "#16A34A" },
+      data: { name: "quick-win", color: "#16A34A", userId: user.id },
     }),
     prisma.tag.create({
-      data: { name: "blocked", color: "#9333EA" },
+      data: { name: "blocked", color: "#9333EA", userId: user.id },
     }),
     prisma.tag.create({
-      data: { name: "review", color: "#2563EB" },
+      data: { name: "review", color: "#2563EB", userId: user.id },
     }),
   ]);
 
@@ -172,6 +186,7 @@ async function main() {
     await prisma.todo.create({
       data: {
         ...data,
+        userId: user.id,
         tags: tagIds.length > 0
           ? { create: tagIds.map((tagId) => ({ tagId })) }
           : undefined,

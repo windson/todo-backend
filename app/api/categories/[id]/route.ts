@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { UpdateCategorySchema } from "@/lib/validation";
+import { requireUser } from "@/lib/auth";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -11,10 +12,11 @@ export async function GET(
   context: RouteContext
 ) {
   try {
+    const { userId } = await requireUser(request);
     const { id } = await context.params;
 
-    const category = await prisma.category.findUnique({
-      where: { id },
+    const category = await prisma.category.findFirst({
+      where: { id, userId },
       include: {
         _count: { select: { todos: true } },
         todos: {
@@ -49,6 +51,7 @@ export async function PATCH(
   context: RouteContext
 ) {
   try {
+    const { userId } = await requireUser(request);
     const { id } = await context.params;
     const body = await request.json();
     const parsed = UpdateCategorySchema.safeParse(body);
@@ -57,14 +60,14 @@ export async function PATCH(
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const existing = await prisma.category.findUnique({ where: { id } });
+    const existing = await prisma.category.findFirst({ where: { id, userId } });
     if (!existing) {
       throw ApiError.notFound("Category not found");
     }
 
     if (parsed.data.name && parsed.data.name !== existing.name) {
-      const duplicate = await prisma.category.findUnique({
-        where: { name: parsed.data.name },
+      const duplicate = await prisma.category.findFirst({
+        where: { userId, name: parsed.data.name },
       });
       if (duplicate) {
         throw ApiError.conflict("A category with this name already exists");
@@ -88,10 +91,11 @@ export async function DELETE(
   context: RouteContext
 ) {
   try {
+    const { userId } = await requireUser(request);
     const { id } = await context.params;
 
-    const existing = await prisma.category.findUnique({
-      where: { id },
+    const existing = await prisma.category.findFirst({
+      where: { id, userId },
       include: { _count: { select: { todos: true } } },
     });
 

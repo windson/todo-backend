@@ -5,9 +5,15 @@ import { describe, it, expect } from "vitest";
 import { prismaMock } from "../helpers/prisma-mock";
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/todos/route";
+import { createToken } from "@/lib/auth";
+
+// A valid session token so the auth guard in each handler lets requests through.
+const authToken = await createToken({ userId: "user-1", email: "user@example.com" });
 
 function makeRequest(url: string, init?: RequestInit): NextRequest {
-  return new NextRequest(new Request(url, init));
+  const headers = new Headers(init?.headers);
+  headers.set("authorization", `Bearer ${authToken}`);
+  return new NextRequest(new Request(url, { ...init, headers }));
 }
 
 describe("GET /api/todos", () => {

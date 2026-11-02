@@ -4,13 +4,70 @@ const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "Todo API",
-    description: "A comprehensive Todo application API with categories, tags, priorities, and advanced filtering.",
+    description: "A comprehensive Todo application API with categories, tags, priorities, and advanced filtering. All endpoints except /api/auth/* and /api/doc require authentication; sign up or log in to obtain a session (httpOnly cookie) and all data is scoped to the authenticated user.",
     version: "1.0.0",
   },
   servers: [
     { url: "http://localhost:3000", description: "Development server" },
   ],
+  security: [{ cookieAuth: [] }, { bearerAuth: [] }],
   paths: {
+    "/api/auth/signup": {
+      post: {
+        summary: "Register a new user",
+        description: "Create a new user account and start a session (sets an httpOnly session cookie).",
+        tags: ["Auth"],
+        security: [],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/SignupInput" } } },
+        },
+        responses: {
+          "201": { description: "Created user", content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } } } },
+          "400": { description: "Validation error", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+          "409": { description: "Email already registered", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+        },
+      },
+    },
+    "/api/auth/login": {
+      post: {
+        summary: "Log in",
+        description: "Authenticate with email and password and start a session (sets an httpOnly session cookie).",
+        tags: ["Auth"],
+        security: [],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/LoginInput" } } },
+        },
+        responses: {
+          "200": { description: "Authenticated user", content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } } } },
+          "400": { description: "Validation error", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+          "401": { description: "Invalid credentials", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+        },
+      },
+    },
+    "/api/auth/logout": {
+      post: {
+        summary: "Log out",
+        description: "Clear the session cookie.",
+        tags: ["Auth"],
+        security: [],
+        responses: {
+          "200": { description: "Logged out" },
+        },
+      },
+    },
+    "/api/auth/me": {
+      get: {
+        summary: "Get the current user",
+        description: "Return the authenticated user's profile. Requires authentication.",
+        tags: ["Auth"],
+        responses: {
+          "200": { description: "Current user", content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } } } },
+          "401": { description: "Not authenticated", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+        },
+      },
+    },
     "/api/todos": {
       get: {
         summary: "List todos",
@@ -268,7 +325,54 @@ const openApiSpec = {
     },
   },
   components: {
+    securitySchemes: {
+      cookieAuth: {
+        type: "apiKey",
+        in: "cookie",
+        name: "token",
+        description: "Session JWT stored in an httpOnly cookie, set by signup/login.",
+      },
+      bearerAuth: {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "JWT",
+        description: "Session JWT passed as 'Authorization: Bearer <token>'.",
+      },
+    },
     schemas: {
+      User: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          email: { type: "string", format: "email" },
+          name: { type: "string", nullable: true },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      SignupInput: {
+        type: "object",
+        required: ["email", "password"],
+        properties: {
+          email: { type: "string", format: "email", maxLength: 255 },
+          password: { type: "string", minLength: 8, maxLength: 128 },
+          name: { type: "string", minLength: 1, maxLength: 100 },
+        },
+      },
+      LoginInput: {
+        type: "object",
+        required: ["email", "password"],
+        properties: {
+          email: { type: "string", format: "email" },
+          password: { type: "string" },
+        },
+      },
+      AuthResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/User" },
+        },
+      },
       Todo: {
         type: "object",
         properties: {
