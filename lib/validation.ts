@@ -222,6 +222,57 @@ export const UpdateSavedViewSchema = z.object({
   filters: SavedViewFiltersSchema.optional(),
 });
 
+// Analytics & data-insight (FEAT-009).
+// Optional query params for GET /api/analytics. `days` controls how far back
+// the completion-trend window reaches (default 30, capped at 365).
+export const AnalyticsQueryParamsSchema = z.object({
+  days: z.coerce.number().int().min(1, "days must be at least 1").max(365, "days must be 365 or less").optional(),
+});
+
+// Export format for GET /api/export. `json` (default) returns the full nested
+// backup; `csv` returns a flat todos CSV.
+export const ExportQueryParamsSchema = z.object({
+  format: z.enum(["json", "csv"]).optional(),
+});
+
+// Import payload (FEAT-009). The JSON import mirrors the export shape: a bundle
+// of the user's categories, tags, and todos. Every record is created for the
+// CURRENT user - any userId/ownership fields in the payload are ignored, so a
+// payload can never write into another user's data. Category/tag names are
+// per-user unique, so duplicates are reused (by name) rather than erroring.
+const ImportColor = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/, "Color must be a valid hex color (e.g. #ff0000)");
+
+export const ImportCategorySchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less"),
+  color: ImportColor.optional(),
+});
+
+export const ImportTagSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less"),
+  color: ImportColor.optional(),
+});
+
+export const ImportTodoSchema = z.object({
+  title: z.string().min(1, "Title is required").max(255, "Title must be 255 characters or less"),
+  description: z.string().max(1000, "Description must be 1000 characters or less").nullable().optional(),
+  completed: z.boolean().optional(),
+  priority: PriorityEnum.optional(),
+  startDate: z.coerce.date().nullable().optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+  // Referenced by NAME so an import is portable across accounts. Names are
+  // resolved to the current user's categories/tags (created if missing).
+  category: z.string().max(100).nullable().optional(),
+  tags: z.array(z.string().max(100)).optional(),
+});
+
+export const ImportBundleSchema = z.object({
+  categories: z.array(ImportCategorySchema).max(1000, "Too many categories").optional(),
+  tags: z.array(ImportTagSchema).max(1000, "Too many tags").optional(),
+  todos: z.array(ImportTodoSchema).max(5000, "Too many todos").optional(),
+});
+
 export const TodoTagsSchema = z.object({
   tagIds: z.array(z.string()).min(1, "At least one tag ID is required"),
 });
@@ -256,3 +307,9 @@ export type ShareRoleInput = z.infer<typeof ShareRoleEnum>;
 export type CreateShareInput = z.infer<typeof CreateShareSchema>;
 export type UpdateShareInput = z.infer<typeof UpdateShareSchema>;
 export type SharableUserQuery = z.infer<typeof SharableUserQuerySchema>;
+export type AnalyticsQueryParams = z.infer<typeof AnalyticsQueryParamsSchema>;
+export type ExportQueryParams = z.infer<typeof ExportQueryParamsSchema>;
+export type ImportCategoryInput = z.infer<typeof ImportCategorySchema>;
+export type ImportTagInput = z.infer<typeof ImportTagSchema>;
+export type ImportTodoInput = z.infer<typeof ImportTodoSchema>;
+export type ImportBundleInput = z.infer<typeof ImportBundleSchema>;

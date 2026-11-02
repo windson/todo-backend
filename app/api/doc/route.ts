@@ -676,6 +676,60 @@ const openApiSpec = {
         },
       },
     },
+    "/api/analytics": {
+      get: {
+        summary: "Per-user productivity analytics",
+        description: "Aggregates over the authenticated user's OWNED todos only (shared-with-me todos are excluded to avoid double-counting). Returns totals (total/completed/active/overdue/completionRate), breakdowns by priority/status/category, and a per-day completion+creation trend over the last `days` days (default 30).",
+        tags: ["Analytics"],
+        parameters: [
+          { name: "days", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 365, default: 30 }, description: "Length of the completion-trend window in days." },
+        ],
+        responses: {
+          "200": { description: "Analytics result", content: { "application/json": { schema: { $ref: "#/components/schemas/AnalyticsResponse" } } } },
+          "400": { description: "Invalid query parameters", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+          "401": { description: "Not authenticated", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+        },
+      },
+    },
+    "/api/export": {
+      get: {
+        summary: "Export the user's data (JSON or CSV)",
+        description: "Download the authenticated user's OWNED todos, categories, and tags as a backup. `format=json` (default) returns a nested bundle; `format=csv` returns a flat todos CSV. The response is an attachment (not wrapped in the success envelope) so it can be re-imported via POST /api/import.",
+        tags: ["Data"],
+        parameters: [
+          { name: "format", in: "query", required: false, schema: { type: "string", enum: ["json", "csv"], default: "json" } },
+        ],
+        responses: {
+          "200": {
+            description: "Export file",
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/ExportBundle" } },
+              "text/csv": { schema: { type: "string" } },
+            },
+          },
+          "401": { description: "Not authenticated", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+        },
+      },
+    },
+    "/api/import": {
+      post: {
+        summary: "Import data into the current user's account",
+        description: "Create todos/categories/tags for the AUTHENTICATED user. Records are always owned by the current user - the payload cannot set another user's id. Category/tag names are reused when they already exist (per-user unique), created otherwise. Accepts a JSON bundle (application/json), an envelope { format, content }, or a flat todos CSV (text/csv or ?format=csv). Returns a summary of created/reused/skipped counts and per-row errors.",
+        tags: ["Data"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/ImportBundle" } },
+            "text/csv": { schema: { type: "string" } },
+          },
+        },
+        responses: {
+          "200": { description: "Import summary", content: { "application/json": { schema: { $ref: "#/components/schemas/ImportSummaryResponse" } } } },
+          "400": { description: "Validation error", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+          "401": { description: "Not authenticated", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -1150,6 +1204,161 @@ const openApiSpec = {
         properties: {
           success: { type: "boolean" },
           data: { type: "array", items: { $ref: "#/components/schemas/SavedView" } },
+        },
+      },
+      CountBucket: {
+        type: "object",
+        properties: {
+          key: { type: "string" },
+          count: { type: "integer" },
+        },
+      },
+      TrendPoint: {
+        type: "object",
+        properties: {
+          date: { type: "string", example: "2024-01-15" },
+          completed: { type: "integer" },
+          created: { type: "integer" },
+        },
+      },
+      Analytics: {
+        type: "object",
+        properties: {
+          rangeDays: { type: "integer" },
+          rangeStart: { type: "string", format: "date-time" },
+          totals: {
+            type: "object",
+            properties: {
+              total: { type: "integer" },
+              completed: { type: "integer" },
+              active: { type: "integer" },
+              overdue: { type: "integer" },
+              completionRate: { type: "number", description: "completed/total, rounded to 3 decimals" },
+            },
+          },
+          byPriority: { type: "array", items: { $ref: "#/components/schemas/CountBucket" } },
+          byStatus: { type: "array", items: { $ref: "#/components/schemas/CountBucket" } },
+          byCategory: { type: "array", items: { $ref: "#/components/schemas/CountBucket" } },
+          trend: { type: "array", items: { $ref: "#/components/schemas/TrendPoint" } },
+        },
+      },
+      AnalyticsResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/Analytics" },
+        },
+      },
+      ExportBundle: {
+        type: "object",
+        properties: {
+          exportedAt: { type: "string", format: "date-time" },
+          version: { type: "integer", example: 1 },
+          categories: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { name: { type: "string" }, color: { type: "string" } },
+            },
+          },
+          tags: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { name: { type: "string" }, color: { type: "string" } },
+            },
+          },
+          todos: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                description: { type: "string", nullable: true },
+                completed: { type: "boolean" },
+                priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"] },
+                startDate: { type: "string", format: "date-time", nullable: true },
+                dueDate: { type: "string", format: "date-time", nullable: true },
+                category: { type: "string", nullable: true },
+                tags: { type: "array", items: { type: "string" } },
+              },
+            },
+          },
+        },
+      },
+      ImportBundle: {
+        type: "object",
+        description: "Import payload. All records are created for the current user; names reference the current user's categories/tags (reused or created).",
+        properties: {
+          categories: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["name"],
+              properties: { name: { type: "string" }, color: { type: "string" } },
+            },
+          },
+          tags: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["name"],
+              properties: { name: { type: "string" }, color: { type: "string" } },
+            },
+          },
+          todos: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["title"],
+              properties: {
+                title: { type: "string" },
+                description: { type: "string", nullable: true },
+                completed: { type: "boolean" },
+                priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"] },
+                startDate: { type: "string", format: "date-time", nullable: true },
+                dueDate: { type: "string", format: "date-time", nullable: true },
+                category: { type: "string", nullable: true },
+                tags: { type: "array", items: { type: "string" } },
+              },
+            },
+          },
+        },
+      },
+      ImportSummary: {
+        type: "object",
+        properties: {
+          created: {
+            type: "object",
+            properties: {
+              categories: { type: "integer" },
+              tags: { type: "integer" },
+              todos: { type: "integer" },
+            },
+          },
+          skipped: {
+            type: "object",
+            properties: {
+              categories: { type: "integer" },
+              tags: { type: "integer" },
+              todos: { type: "integer" },
+            },
+          },
+          reused: {
+            type: "object",
+            properties: {
+              categories: { type: "integer" },
+              tags: { type: "integer" },
+            },
+          },
+          errors: { type: "array", items: { type: "string" } },
+        },
+      },
+      ImportSummaryResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/ImportSummary" },
         },
       },
       ErrorResponse: {
