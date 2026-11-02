@@ -219,7 +219,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:7.0
+        Image: aws/codebuild/standard:8.0
         # Only the specific variables each build step needs are declared here.
         # The buildspec never dumps the full environment (no printenv/env/set).
         EnvironmentVariables:
