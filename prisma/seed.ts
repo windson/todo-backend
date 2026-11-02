@@ -229,6 +229,25 @@ async function main() {
   }
 
   console.log(`Created 1 parent todo with ${subtasks.length} subtasks`);
+
+  // Create a recurring todo to exercise the recurrence feature. Completing it
+  // via the API will spawn the next weekly occurrence.
+  await prisma.todo.create({
+    data: {
+      title: "Weekly team sync",
+      description: "Recurring weekly standup with the team",
+      priority: Priority.MEDIUM,
+      startDate: now,
+      dueDate: tomorrow,
+      recurrenceRule: "WEEKLY",
+      recurrenceInterval: 1,
+      categoryId: categories[0].id,
+      order: 14,
+      userId: user.id,
+    },
+  });
+
+  console.log("Created 1 recurring todo");
   console.log("Seeding completed!");
 }
 

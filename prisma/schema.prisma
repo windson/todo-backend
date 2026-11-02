@@ -13,6 +13,12 @@ enum Priority {
   URGENT
 }
 
+enum RecurrenceRule {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -32,10 +38,20 @@ model Todo {
   description String?
   completed   Boolean   @default(false)
   priority    Priority  @default(MEDIUM)
+  startDate   DateTime?
   dueDate     DateTime?
   order       Int       @default(0)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  // Recurrence: when recurrenceRule is set, completing this todo generates the
+  // next occurrence with dates advanced by `recurrenceInterval` units of the
+  // rule's frequency. recurrenceGeneratedId records the id of the occurrence
+  // that was spawned so completing the same todo twice does not create
+  // duplicates (the second completion is a no-op for generation).
+  recurrenceRule        RecurrenceRule?
+  recurrenceInterval    Int             @default(1)
+  recurrenceGeneratedId String?
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -55,6 +71,7 @@ model Todo {
   @@index([priority])
   @@index([completed])
   @@index([dueDate])
+  @@index([startDate])
 }
 
 model Category {

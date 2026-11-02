@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/errors";
 import { CreateTodoSchema, TodoQueryParamsSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
 import { formatTodo, todoInclude } from "@/lib/todo-format";
+import { buildDueDateFilter } from "@/lib/todo-filters";
 import { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
       includeSubtasks,
       dueBefore,
       dueAfter,
+      dueFilter,
       sortBy = "createdAt",
       sortOrder = "desc",
       limit = 20,
@@ -71,10 +73,16 @@ export async function GET(request: NextRequest) {
       where.tags = { some: { tagId } };
     }
 
-    if (dueBefore || dueAfter) {
-      where.dueDate = {};
-      if (dueBefore) where.dueDate.lte = dueBefore;
-      if (dueAfter) where.dueDate.gte = dueAfter;
+    // Smart-list due-date filters (today/upcoming/overdue) layer on top of the
+    // explicit dueBefore/dueAfter range. All share the single `dueDate` clause.
+    if (dueBefore || dueAfter || dueFilter) {
+      const dueDate: Prisma.DateTimeNullableFilter = {};
+      if (dueBefore) dueDate.lte = dueBefore;
+      if (dueAfter) dueDate.gte = dueAfter;
+      if (dueFilter) {
+        Object.assign(dueDate, buildDueDateFilter(dueFilter));
+      }
+      where.dueDate = dueDate;
     }
 
     const orderBy: Prisma.TodoOrderByWithRelationInput = {};

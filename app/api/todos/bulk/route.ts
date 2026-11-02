@@ -4,6 +4,7 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { BulkOperationSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { generateNextOccurrence } from "@/lib/recurrence-service";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,10 +20,30 @@ export async function POST(request: NextRequest) {
 
     switch (operation) {
       case "complete": {
+        // Load the recurring, not-yet-completed todos in this batch BEFORE the
+        // updateMany so we can spawn their next occurrences (updateMany does not
+        // return rows). Non-recurring todos just get flipped to completed.
+        const recurringToComplete = await prisma.todo.findMany({
+          where: {
+            id: { in: ids },
+            userId,
+            completed: false,
+            recurrenceRule: { not: null },
+          },
+          include: { tags: { select: { tagId: true } } },
+        });
+
         const result = await prisma.todo.updateMany({
           where: { id: { in: ids }, userId },
           data: { completed: true },
         });
+
+        // Generation is idempotent (guarded by recurrenceGeneratedId) so
+        // re-running a bulk complete will not create duplicates.
+        for (const source of recurringToComplete) {
+          await generateNextOccurrence(prisma, source);
+        }
+
         return successResponse({
           message: `${result.count} todo(s) marked as completed`,
           count: result.count,

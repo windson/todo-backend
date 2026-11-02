@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/errors";
 import { UpdateTodoSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
 import { formatTodo, todoInclude } from "@/lib/todo-format";
+import { generateNextOccurrence } from "@/lib/recurrence-service";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -48,7 +49,10 @@ export async function PATCH(
 
     const existing = await prisma.todo.findFirst({
       where: { id, userId },
-      include: { children: { select: { id: true } } },
+      include: {
+        children: { select: { id: true } },
+        tags: { select: { tagId: true } },
+      },
     });
     if (!existing) {
       throw ApiError.notFound("Todo not found");
@@ -107,6 +111,27 @@ export async function PATCH(
       },
       include: todoInclude,
     });
+
+    // When a recurring todo transitions to completed, spawn the next
+    // occurrence. Generation is idempotent (guarded by recurrenceGeneratedId).
+    const becameCompleted = existing.completed === false && updateData.completed === true;
+    if (becameCompleted && existing.recurrenceRule) {
+      await generateNextOccurrence(prisma, {
+        id: existing.id,
+        title: todo.title,
+        description: todo.description,
+        priority: todo.priority,
+        startDate: todo.startDate,
+        dueDate: todo.dueDate,
+        recurrenceRule: todo.recurrenceRule,
+        recurrenceInterval: todo.recurrenceInterval,
+        recurrenceGeneratedId: existing.recurrenceGeneratedId,
+        userId,
+        categoryId: todo.categoryId,
+        parentId: todo.parentId,
+        tags: existing.tags,
+      });
+    }
 
     return successResponse(formatTodo(todo));
   } catch (error) {
