@@ -1,0 +1,181 @@
+name: Kiro PR Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: kiro-pr-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Resolve pull request
+        id: pr
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        with:
+          script: |
+            const prNumber = Number(process.env.PR_NUMBER);
+            if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
+              core.setFailed(`Invalid pull request number: ${process.env.PR_NUMBER}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            core.setOutput('number', String(prNumber));
+            core.setOutput('base_sha', pr.base.sha);
+            core.setOutput('base_ref', pr.base.ref);
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('head_ref', pr.head.ref);
+
+      - name: Check out trusted review automation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.base_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check out pull request as review target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+          path: review-target
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare review context
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git -C review-target cat-file -e "$BASE_SHA^{commit}"
+          mkdir -p .kiro/review-input
+          git -C review-target diff --find-renames --unified=80 "$BASE_SHA...$HEAD_SHA" -- > .kiro/review-input/pr.diff
+          git -C review-target diff --name-only --diff-filter=ACMR "$BASE_SHA...$HEAD_SHA" -- \
+            | sed 's#^#review-target/#' > .kiro/review-input/changed-files.txt
+          {
+            echo "Repository: $REPOSITORY"
+            echo "Pull request: #$PR_NUMBER"
+            echo "Base: $BASE_REF ($BASE_SHA)"
+            echo "Head: $HEAD_REF ($HEAD_SHA)"
+            echo "Source root: review-target/"
+            echo
+            echo "Changed files:"
+            cat .kiro/review-input/changed-files.txt
+          } > .kiro/review-input/context.md
+
+      - name: Install Kiro CLI
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -fsSL https://cli.kiro.dev/install | bash
+          "$HOME/.local/bin/kiro-cli" --version
+
+      - name: Run Kiro review
+        id: kiro
+        continue-on-error: true
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+          KIRO_LOG_NO_COLOR: "1"
+          NO_COLOR: "1"
+          TERM: dumb
+        run: |
+          set -euo pipefail
+          if [[ -z "$KIRO_API_KEY" ]]; then
+            echo "KIRO_API_KEY is not configured" >&2
+            exit 2
+          fi
+
+          set +e
+          "$HOME/.local/bin/kiro-cli" chat \
+            --v2 \
+            --agent pr-reviewer \
+            --no-interactive \
+            --output-format stream-json \
+            --trust-tools=fs_read,grep \
+            "Review this pull request. Follow the repository-local reviewer instructions and return only the final Markdown review." \
+            > "$RUNNER_TEMP/kiro-review.jsonl" 2>&1
+          cli_status=$?
+          set -e
+
+          echo "exit_code=$cli_status" >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/extract-kiro-review.py \
+            "$RUNNER_TEMP/kiro-review.jsonl" \
+            "$RUNNER_TEMP/kiro-review.md" \
+            --exit-code "$cli_status"
+
+      - name: Create or update review comment
+        if: always() && steps.pr.outputs.number != ''
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          KIRO_STEP_OUTCOME: ${{ steps.kiro.outcome }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- kiro-pr-review -->';
+            const reviewPath = `${process.env.RUNNER_TEMP}/kiro-review.md`;
+            const review = fs.existsSync(reviewPath)
+              ? fs.readFileSync(reviewPath, 'utf8').trim()
+              : '## Review unavailable\n\nThe Kiro review step did not produce an output file.';
+            const icon = process.env.KIRO_STEP_OUTCOME === 'success' ? '🔍' : '⚠️';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `${marker}\n## ${icon} Kiro automated PR review\n\n${review}\n\n---\n[GitHub Actions run](${runUrl}) · [Kiro headless mode](https://kiro.dev/docs/cli/headless/)`;
+            const prNumber = Number(process.env.PR_NUMBER);
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const previous = comments.find(
+              (comment) => comment.user?.type === 'Bot' && comment.body?.includes(marker),
+            );
+
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+
+      - name: Require successful Kiro review
+        if: steps.kiro.outcome != 'success'
+        run: exit 1
