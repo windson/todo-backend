@@ -145,6 +145,34 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      case "reorder": {
+        if (new Set(ids).size !== ids.length) {
+          throw ApiError.badRequest("Reorder IDs must be unique");
+        }
+
+        const ownedTodos = await prisma.todo.findMany({
+          where: { id: { in: ids }, userId },
+          select: { id: true },
+        });
+        if (ownedTodos.length !== ids.length) {
+          throw ApiError.badRequest("One or more todos could not be reordered");
+        }
+
+        await prisma.$transaction(
+          ids.map((id, order) =>
+            prisma.todo.update({
+              where: { id, userId },
+              data: { order },
+            })
+          )
+        );
+
+        return successResponse({
+          message: `${ids.length} todo(s) reordered`,
+          count: ids.length,
+        });
+      }
+
       case "complete": {
         // Load the recurring, not-yet-completed todos in this batch BEFORE the
         // updateMany so we can spawn their next occurrences (updateMany does not

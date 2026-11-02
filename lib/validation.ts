@@ -107,7 +107,7 @@ export const TodoQueryParamsSchema = z.object({
   dueBefore: z.coerce.date().optional(),
   dueAfter: z.coerce.date().optional(),
   dueFilter: z.enum(["today", "upcoming", "overdue"]).optional(),
-  sortBy: z.enum(["createdAt", "dueDate", "priority", "title"]).optional(),
+  sortBy: z.enum(["createdAt", "dueDate", "priority", "title", "order"]).optional(),
   sortOrder: z.enum(["asc", "desc"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   offset: z.coerce.number().int().min(0).optional(),
@@ -172,6 +172,7 @@ export const BulkOperationSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("complete"), ids: bulkIds }),
   z.object({ operation: z.literal("uncomplete"), ids: bulkIds }),
   z.object({ operation: z.literal("delete"), ids: bulkIds }),
+  z.object({ operation: z.literal("reorder"), ids: bulkIds }),
   z.object({ operation: z.literal("setPriority"), ids: bulkIds, priority: PriorityEnum }),
   z.object({
     operation: z.literal("setCategory"),
@@ -212,7 +213,7 @@ export const SavedViewFiltersSchema = z
     assigneeId: z.string().optional(),
     sharedWithMe: z.enum(["true", "false"]).optional(),
     dueFilter: z.enum(["today", "upcoming", "overdue"]).optional(),
-    sortBy: z.enum(["createdAt", "dueDate", "priority", "title"]).optional(),
+    sortBy: z.enum(["createdAt", "dueDate", "priority", "title", "order"]).optional(),
     sortOrder: z.enum(["asc", "desc"]).optional(),
   })
   .strict();

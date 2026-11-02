@@ -27,7 +27,7 @@ describe("POST /api/todos/bulk - setPriority", () => {
     const res = await POST(makeRequest({ operation: "setPriority", ids: ["a", "b"], priority: "HIGH" }));
 
     expect(res.status).toBe(200);
-    const updateArg = prismaMock.todo.updateMany.mock.calls[0][0];
+    const updateArg = prismaMock.todo.updateMany.mock.calls[0]![0]!;
     expect(updateArg.where).toEqual({ id: { in: ["a", "b"] }, userId: "user-1" });
     expect(updateArg.data).toEqual({ priority: "HIGH" });
   });
@@ -50,7 +50,7 @@ describe("POST /api/todos/bulk - setCategory", () => {
     expect(prismaMock.category.findFirst).toHaveBeenCalledWith({
       where: { id: "cat-1", userId: "user-1" },
     });
-    const updateArg = prismaMock.todo.updateMany.mock.calls[0][0];
+    const updateArg = prismaMock.todo.updateMany.mock.calls[0]![0]!;
     expect(updateArg.data).toEqual({ categoryId: "cat-1" });
   });
 
@@ -70,7 +70,7 @@ describe("POST /api/todos/bulk - setCategory", () => {
 
     expect(res.status).toBe(200);
     expect(prismaMock.category.findFirst).not.toHaveBeenCalled();
-    const updateArg = prismaMock.todo.updateMany.mock.calls[0][0];
+    const updateArg = prismaMock.todo.updateMany.mock.calls[0]![0]!;
     expect(updateArg.data).toEqual({ categoryId: null });
   });
 });
@@ -87,7 +87,7 @@ describe("POST /api/todos/bulk - addTags", () => {
     const res = await POST(makeRequest({ operation: "addTags", ids: ["a", "b"], tagIds: ["tag-1", "tag-2"] }));
 
     expect(res.status).toBe(200);
-    const createArg = prismaMock.todoTag.createMany.mock.calls[0][0];
+    const createArg = prismaMock.todoTag.createMany.mock.calls[0]![0]!;
     expect(createArg.skipDuplicates).toBe(true);
     expect(createArg.data).toHaveLength(4);
   });
@@ -110,7 +110,7 @@ describe("POST /api/todos/bulk - removeTags", () => {
     const res = await POST(makeRequest({ operation: "removeTags", ids: ["a"], tagIds: ["tag-1"] }));
 
     expect(res.status).toBe(200);
-    const deleteArg = prismaMock.todoTag.deleteMany.mock.calls[0][0];
+    const deleteArg = prismaMock.todoTag.deleteMany.mock.calls[0]![0]!;
     expect(deleteArg.where).toEqual({ todoId: { in: ["a"] }, tagId: { in: ["tag-1"] } });
   });
 });
@@ -127,7 +127,7 @@ describe("POST /api/todos/bulk - caps and existing operations", () => {
     prismaMock.todo.deleteMany.mockResolvedValue({ count: 2 } as never);
     const res = await POST(makeRequest({ operation: "delete", ids: ["a", "b"] }));
     expect(res.status).toBe(200);
-    const deleteArg = prismaMock.todo.deleteMany.mock.calls[0][0];
+    const deleteArg = prismaMock.todo.deleteMany.mock.calls[0]![0]!;
     expect(deleteArg.where).toEqual({ id: { in: ["a", "b"] }, userId: "user-1" });
   });
 
@@ -153,7 +153,7 @@ describe("POST /api/todos/bulk - setAssignee", () => {
     const res = await POST(makeRequest({ operation: "setAssignee", ids: ["a"], assigneeId: null }));
 
     expect(res.status).toBe(200);
-    const updateArg = prismaMock.todo.updateMany.mock.calls[0][0];
+    const updateArg = prismaMock.todo.updateMany.mock.calls[0]![0]!;
     expect(updateArg.data).toEqual({ assigneeId: null });
     // No share lookup needed when clearing.
     expect(prismaMock.todoShare.findMany).not.toHaveBeenCalled();

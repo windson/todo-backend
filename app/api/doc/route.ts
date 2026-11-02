@@ -167,9 +167,9 @@ const openApiSpec = {
               schema: {
                 type: "object",
                 required: ["operation", "ids"],
-                description: "Bulk operation. complete/uncomplete/delete take only ids. setPriority also takes `priority`; setCategory also takes `categoryId` (null clears it); addTags/removeTags also take `tagIds`; setAssignee also takes `assigneeId` (null clears it; a user must own or be shared on every affected todo). Referenced category/tags must belong to the user. Max 50 ids.",
+                description: "Bulk operation. complete/uncomplete/delete/reorder take only ids; reorder treats ids as the complete desired order for the selected owned-todo list. setPriority also takes `priority`; setCategory also takes `categoryId` (null clears it); addTags/removeTags also take `tagIds`; setAssignee also takes `assigneeId` (null clears it; a user must own or be shared on every affected todo). Referenced category/tags must belong to the user. Max 50 ids.",
                 properties: {
-                  operation: { type: "string", enum: ["complete", "uncomplete", "delete", "setPriority", "setCategory", "addTags", "removeTags", "setAssignee"] },
+                  operation: { type: "string", enum: ["complete", "uncomplete", "delete", "reorder", "setPriority", "setCategory", "addTags", "removeTags", "setAssignee"] },
                   ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 },
                   priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"], description: "Required for setPriority" },
                   categoryId: { type: "string", nullable: true, description: "Required for setCategory; null clears the category" },

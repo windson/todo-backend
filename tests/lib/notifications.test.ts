@@ -37,7 +37,7 @@ describe("dispatchDueReminders", () => {
     const now = new Date("2024-02-01T00:00:00.000Z");
     await dispatchDueReminders(client, now);
 
-    const whereArg = client.reminder.findMany.mock.calls[0][0];
+    const whereArg = client.reminder.findMany.mock.calls[0]![0]!;
     expect(whereArg.where).toEqual({ sentAt: null, remindAt: { lte: now } });
   });
 
@@ -49,7 +49,7 @@ describe("dispatchDueReminders", () => {
     const result = await dispatchDueReminders(client, now);
 
     expect(client.notification.create).toHaveBeenCalledOnce();
-    const notifArg = client.notification.create.mock.calls[0][0];
+    const notifArg = client.notification.create.mock.calls[0]![0]!;
     expect(notifArg.data.userId).toBe("user-1");
     expect(notifArg.data.type).toBe("reminder.due");
     expect(notifArg.data.payload).toMatchObject({
@@ -72,7 +72,7 @@ describe("dispatchDueReminders", () => {
     await dispatchDueReminders(client, new Date());
 
     expect(client.activityLog.create).toHaveBeenCalledOnce();
-    const activityArg = client.activityLog.create.mock.calls[0][0];
+    const activityArg = client.activityLog.create.mock.calls[0]![0]!;
     expect(activityArg.data.action).toBe("reminder.dispatched");
   });
 

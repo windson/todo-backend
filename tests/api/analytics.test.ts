@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, type Mock } from "vitest";
 import { prismaMock } from "../helpers/prisma-mock";
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/analytics/route";
@@ -33,9 +33,10 @@ function stubAnalytics(opts: {
     .mockResolvedValueOnce(opts.total)
     .mockResolvedValueOnce(opts.completed)
     .mockResolvedValueOnce(opts.overdue);
-  prismaMock.todo.groupBy
-    .mockResolvedValueOnce(opts.priorityGroups as never)
-    .mockResolvedValueOnce(opts.categoryGroups as never);
+  const groupByMock = prismaMock.todo.groupBy as unknown as Mock;
+  groupByMock
+    .mockResolvedValueOnce(opts.priorityGroups)
+    .mockResolvedValueOnce(opts.categoryGroups);
   prismaMock.todo.findMany
     .mockResolvedValueOnce(
       opts.completedDates.map((updatedAt) => ({ updatedAt })) as never

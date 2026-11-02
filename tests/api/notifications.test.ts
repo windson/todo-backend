@@ -36,7 +36,7 @@ describe("GET /api/notifications", () => {
     expect(res.headers.get("X-Total-Count")).toBe("1");
     const body = await res.json();
     expect(body.data).toHaveLength(1);
-    const whereArg = prismaMock.notification.findMany.mock.calls[0][0];
+    const whereArg = prismaMock.notification.findMany.mock.calls[0]![0]!;
     expect(whereArg.where).toEqual({ userId: "user-1" });
   });
 
@@ -46,7 +46,7 @@ describe("GET /api/notifications", () => {
 
     await GET(makeRequest("http://localhost/api/notifications?read=false"));
 
-    const whereArg = prismaMock.notification.findMany.mock.calls[0][0];
+    const whereArg = prismaMock.notification.findMany.mock.calls[0]![0]!;
     expect(whereArg.where).toEqual({ userId: "user-1", read: false });
   });
 
@@ -69,7 +69,7 @@ describe("PATCH /api/notifications/:id", () => {
     );
 
     expect(res.status).toBe(200);
-    const updateArg = prismaMock.notification.update.mock.calls[0][0];
+    const updateArg = prismaMock.notification.update.mock.calls[0]![0]!;
     expect(updateArg.data).toEqual({ read: true });
   });
 
@@ -87,7 +87,7 @@ describe("PATCH /api/notifications/:id", () => {
     );
 
     expect(res.status).toBe(200);
-    const updateArg = prismaMock.notification.update.mock.calls[0][0];
+    const updateArg = prismaMock.notification.update.mock.calls[0]![0]!;
     expect(updateArg.data).toEqual({ read: false });
   });
 

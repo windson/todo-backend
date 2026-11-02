@@ -46,7 +46,7 @@ function applyCors(response: NextResponse, origin: string, isAllowedOrigin: bool
   return response;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const origin = request.headers.get("origin") ?? "";
   const isAllowedOrigin = ALLOWED_ORIGINS.includes(origin);
 

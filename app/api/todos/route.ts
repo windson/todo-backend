@@ -119,16 +119,16 @@ export async function GET(request: NextRequest) {
       where.dueDate = dueDate;
     }
 
-    const orderBy: Prisma.TodoOrderByWithRelationInput = {};
-    if (sortBy === "priority") {
-      orderBy.priority = sortOrder;
-    } else if (sortBy === "dueDate") {
-      orderBy.dueDate = sortOrder;
-    } else if (sortBy === "title") {
-      orderBy.title = sortOrder;
-    } else {
-      orderBy.createdAt = sortOrder;
-    }
+    const orderBy: Prisma.TodoOrderByWithRelationInput[] =
+      sortBy === "priority"
+        ? [{ priority: sortOrder }]
+        : sortBy === "dueDate"
+          ? [{ dueDate: sortOrder }]
+          : sortBy === "title"
+            ? [{ title: sortOrder }]
+            : sortBy === "order"
+              ? [{ order: sortOrder }, { createdAt: "desc" }]
+              : [{ createdAt: sortOrder }];
 
     const [todos, totalCount] = await Promise.all([
       prisma.todo.findMany({

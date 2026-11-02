@@ -7,7 +7,7 @@ A comprehensive Todo application API built with Next.js App Router, Prisma ORM, 
 - Full CRUD operations for Todos, Categories, and Tags
 - Advanced filtering, searching, and sorting
 - Pagination with total count headers
-- Bulk operations (complete, uncomplete, delete)
+- Bulk operations (complete, uncomplete, delete, reorder, priority, category, tags, and assignee)
 - Priority levels (LOW, MEDIUM, HIGH, URGENT)
 - Due date tracking
 - Category and tag organization
@@ -116,7 +116,7 @@ The API will be available at http://localhost:3000.
 | tagId | string | Filter by tag ID |
 | dueBefore | date | Filter todos due before this date |
 | dueAfter | date | Filter todos due after this date |
-| sortBy | string | Sort by: createdAt, dueDate, priority, title (default: createdAt) |
+| sortBy | string | Sort by: createdAt, dueDate, priority, title, order (default: createdAt) |
 | sortOrder | string | Sort order: asc, desc (default: desc) |
 | limit | number | Page size (default: 20, max: 100) |
 | offset | number | Pagination offset (default: 0) |
