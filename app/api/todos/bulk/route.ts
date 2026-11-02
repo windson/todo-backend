@@ -19,6 +19,87 @@ export async function POST(request: NextRequest) {
     const { operation, ids } = parsed.data;
 
     switch (operation) {
+      case "setPriority": {
+        const result = await prisma.todo.updateMany({
+          where: { id: { in: ids }, userId },
+          data: { priority: parsed.data.priority },
+        });
+        return successResponse({
+          message: `${result.count} todo(s) updated to ${parsed.data.priority} priority`,
+          count: result.count,
+        });
+      }
+
+      case "setCategory": {
+        const { categoryId } = parsed.data;
+        // A non-null categoryId MUST belong to the current user; clearing with
+        // null is always allowed.
+        if (categoryId !== null) {
+          const category = await prisma.category.findFirst({
+            where: { id: categoryId, userId },
+          });
+          if (!category) {
+            throw ApiError.badRequest("Category not found");
+          }
+        }
+        const result = await prisma.todo.updateMany({
+          where: { id: { in: ids }, userId },
+          data: { categoryId },
+        });
+        return successResponse({
+          message: categoryId
+            ? `${result.count} todo(s) moved to the selected category`
+            : `${result.count} todo(s) had their category cleared`,
+          count: result.count,
+        });
+      }
+
+      case "addTags": {
+        const { tagIds } = parsed.data;
+        // Every referenced tag MUST belong to the current user.
+        const tags = await prisma.tag.findMany({
+          where: { id: { in: tagIds }, userId },
+        });
+        if (tags.length !== new Set(tagIds).size) {
+          throw ApiError.badRequest("One or more tags not found");
+        }
+        // Only touch todos the user owns, then upsert the join rows. createMany
+        // with skipDuplicates keeps the operation idempotent.
+        const ownedTodos = await prisma.todo.findMany({
+          where: { id: { in: ids }, userId },
+          select: { id: true },
+        });
+        const joinRows = ownedTodos.flatMap((todo) =>
+          tagIds.map((tagId) => ({ todoId: todo.id, tagId }))
+        );
+        if (joinRows.length > 0) {
+          await prisma.todoTag.createMany({
+            data: joinRows,
+            skipDuplicates: true,
+          });
+        }
+        return successResponse({
+          message: `Tags added to ${ownedTodos.length} todo(s)`,
+          count: ownedTodos.length,
+        });
+      }
+
+      case "removeTags": {
+        const { tagIds } = parsed.data;
+        const ownedTodos = await prisma.todo.findMany({
+          where: { id: { in: ids }, userId },
+          select: { id: true },
+        });
+        const ownedIds = ownedTodos.map((todo) => todo.id);
+        const result = await prisma.todoTag.deleteMany({
+          where: { todoId: { in: ownedIds }, tagId: { in: tagIds } },
+        });
+        return successResponse({
+          message: `Removed ${result.count} tag association(s) from ${ownedTodos.length} todo(s)`,
+          count: ownedTodos.length,
+        });
+      }
+
       case "complete": {
         // Load the recurring, not-yet-completed todos in this batch BEFORE the
         // updateMany so we can spawn their next occurrences (updateMany does not

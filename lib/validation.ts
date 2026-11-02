@@ -129,9 +129,62 @@ export const MarkNotificationSchema = z.object({
   read: z.boolean().optional(),
 });
 
-export const BulkOperationSchema = z.object({
-  operation: z.enum(["complete", "uncomplete", "delete"]),
-  ids: z.array(z.string()).min(1, "At least one ID is required").max(50, "Cannot process more than 50 items at once"),
+const bulkIds = z
+  .array(z.string())
+  .min(1, "At least one ID is required")
+  .max(50, "Cannot process more than 50 items at once");
+
+// Bulk operations are a discriminated union on `operation` so each variant can
+// carry only the payload it needs. The existing complete/uncomplete/delete
+// operations stay payload-free; the new ones carry the entity they apply.
+export const BulkOperationSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("complete"), ids: bulkIds }),
+  z.object({ operation: z.literal("uncomplete"), ids: bulkIds }),
+  z.object({ operation: z.literal("delete"), ids: bulkIds }),
+  z.object({ operation: z.literal("setPriority"), ids: bulkIds, priority: PriorityEnum }),
+  z.object({
+    operation: z.literal("setCategory"),
+    ids: bulkIds,
+    // null clears the category; a string assigns a category the user owns.
+    categoryId: z.string().nullable(),
+  }),
+  z.object({
+    operation: z.literal("addTags"),
+    ids: bulkIds,
+    tagIds: z.array(z.string()).min(1, "At least one tag ID is required"),
+  }),
+  z.object({
+    operation: z.literal("removeTags"),
+    ids: bulkIds,
+    tagIds: z.array(z.string()).min(1, "At least one tag ID is required"),
+  }),
+]);
+
+// The persisted shape of a SavedView's `filters` JSON. This is a subset of the
+// GET /api/todos query params (see TodoQueryParamsSchema) that the frontend
+// round-trips through its TodoFilters. Validated on create/update so garbage
+// cannot be stored in the Json column. All fields are optional.
+export const SavedViewFiltersSchema = z
+  .object({
+    search: z.string().max(255).optional(),
+    completed: z.enum(["true", "false"]).optional(),
+    priority: z.string().max(64).optional(),
+    categoryId: z.string().optional(),
+    tagId: z.string().optional(),
+    dueFilter: z.enum(["today", "upcoming", "overdue"]).optional(),
+    sortBy: z.enum(["createdAt", "dueDate", "priority", "title"]).optional(),
+    sortOrder: z.enum(["asc", "desc"]).optional(),
+  })
+  .strict();
+
+export const CreateSavedViewSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less"),
+  filters: SavedViewFiltersSchema,
+});
+
+export const UpdateSavedViewSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less").optional(),
+  filters: SavedViewFiltersSchema.optional(),
 });
 
 export const TodoTagsSchema = z.object({
@@ -151,6 +204,9 @@ export type CreateTagInput = z.infer<typeof CreateTagSchema>;
 export type UpdateTagInput = z.infer<typeof UpdateTagSchema>;
 export type TodoQueryParams = z.infer<typeof TodoQueryParamsSchema>;
 export type BulkOperationInput = z.infer<typeof BulkOperationSchema>;
+export type SavedViewFilters = z.infer<typeof SavedViewFiltersSchema>;
+export type CreateSavedViewInput = z.infer<typeof CreateSavedViewSchema>;
+export type UpdateSavedViewInput = z.infer<typeof UpdateSavedViewSchema>;
 export type CreateAttachmentInput = z.infer<typeof CreateAttachmentSchema>;
 export type CreateCommentInput = z.infer<typeof CreateCommentSchema>;
 export type UpdateCommentInput = z.infer<typeof UpdateCommentSchema>;

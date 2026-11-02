@@ -155,9 +155,13 @@ const openApiSpec = {
               schema: {
                 type: "object",
                 required: ["operation", "ids"],
+                description: "Bulk operation. complete/uncomplete/delete take only ids. setPriority also takes `priority`; setCategory also takes `categoryId` (null clears it); addTags/removeTags also take `tagIds`. Referenced category/tags must belong to the user. Max 50 ids.",
                 properties: {
-                  operation: { type: "string", enum: ["complete", "uncomplete", "delete"] },
-                  ids: { type: "array", items: { type: "string" }, minItems: 1 },
+                  operation: { type: "string", enum: ["complete", "uncomplete", "delete", "setPriority", "setCategory", "addTags", "removeTags"] },
+                  ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 },
+                  priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"], description: "Required for setPriority" },
+                  categoryId: { type: "string", nullable: true, description: "Required for setCategory; null clears the category" },
+                  tagIds: { type: "array", items: { type: "string" }, minItems: 1, description: "Required for addTags/removeTags" },
                 },
               },
             },
@@ -420,6 +424,65 @@ const openApiSpec = {
         responses: {
           "200": { description: "Updated notification", content: { "application/json": { schema: { $ref: "#/components/schemas/NotificationResponse" } } } },
           "404": { description: "Notification not found" },
+        },
+      },
+    },
+    "/api/views": {
+      get: {
+        summary: "List the current user's saved views",
+        description: "Return the authenticated user's saved views (named filter combinations), oldest first.",
+        tags: ["Saved Views"],
+        responses: {
+          "200": { description: "List of saved views", content: { "application/json": { schema: { $ref: "#/components/schemas/SavedViewListResponse" } } } },
+        },
+      },
+      post: {
+        summary: "Create a saved view",
+        description: "Create a named saved view. `filters` is validated against the allowed TodoFilters shape before it is stored.",
+        tags: ["Saved Views"],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/CreateSavedView" } } },
+        },
+        responses: {
+          "201": { description: "Created saved view", content: { "application/json": { schema: { $ref: "#/components/schemas/SavedViewResponse" } } } },
+          "400": { description: "Validation error" },
+          "409": { description: "A saved view with this name already exists" },
+        },
+      },
+    },
+    "/api/views/{id}": {
+      get: {
+        summary: "Get a saved view",
+        tags: ["Saved Views"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Saved view", content: { "application/json": { schema: { $ref: "#/components/schemas/SavedViewResponse" } } } },
+          "404": { description: "Saved view not found" },
+        },
+      },
+      patch: {
+        summary: "Update a saved view",
+        tags: ["Saved Views"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/UpdateSavedView" } } },
+        },
+        responses: {
+          "200": { description: "Updated saved view", content: { "application/json": { schema: { $ref: "#/components/schemas/SavedViewResponse" } } } },
+          "400": { description: "Validation error" },
+          "404": { description: "Saved view not found" },
+          "409": { description: "A saved view with this name already exists" },
+        },
+      },
+      delete: {
+        summary: "Delete a saved view",
+        tags: ["Saved Views"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Saved view deleted" },
+          "404": { description: "Saved view not found" },
         },
       },
     },
@@ -895,6 +958,59 @@ const openApiSpec = {
               allOf: [{ $ref: "#/components/schemas/Category" }, { type: "object", properties: { todoCount: { type: "integer" } } }],
             },
           },
+        },
+      },
+      SavedViewFilters: {
+        type: "object",
+        description: "A subset of the GET /api/todos query params the frontend round-trips through its TodoFilters. Validated before storage; unknown keys are rejected.",
+        properties: {
+          search: { type: "string", maxLength: 255 },
+          completed: { type: "string", enum: ["true", "false"] },
+          priority: { type: "string", description: "Comma-separated priority list, e.g. 'HIGH,URGENT'" },
+          categoryId: { type: "string" },
+          tagId: { type: "string" },
+          dueFilter: { type: "string", enum: ["today", "upcoming", "overdue"] },
+          sortBy: { type: "string", enum: ["createdAt", "dueDate", "priority", "title"] },
+          sortOrder: { type: "string", enum: ["asc", "desc"] },
+        },
+      },
+      SavedView: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          filters: { $ref: "#/components/schemas/SavedViewFilters" },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      CreateSavedView: {
+        type: "object",
+        required: ["name", "filters"],
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 100 },
+          filters: { $ref: "#/components/schemas/SavedViewFilters" },
+        },
+      },
+      UpdateSavedView: {
+        type: "object",
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 100 },
+          filters: { $ref: "#/components/schemas/SavedViewFilters" },
+        },
+      },
+      SavedViewResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/SavedView" },
+        },
+      },
+      SavedViewListResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { type: "array", items: { $ref: "#/components/schemas/SavedView" } },
         },
       },
       ErrorResponse: {

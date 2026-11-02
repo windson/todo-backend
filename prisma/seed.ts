@@ -326,6 +326,27 @@ async function main() {
   });
 
   console.log("Created 1 reminder and 1 unread notification");
+
+  // Add a couple of saved views (named smart filters) so the saved-views /
+  // board feature has seed data. `filters` mirrors the GET /api/todos query
+  // params the frontend round-trips through its TodoFilters.
+  await prisma.savedView.create({
+    data: {
+      userId: user.id,
+      name: "High priority",
+      filters: { priority: "HIGH,URGENT", completed: "false", sortBy: "dueDate", sortOrder: "asc" },
+    },
+  });
+
+  await prisma.savedView.create({
+    data: {
+      userId: user.id,
+      name: "Due today",
+      filters: { dueFilter: "today", completed: "false" },
+    },
+  });
+
+  console.log("Created 2 saved views");
   console.log("Seeding completed!");
 }
 

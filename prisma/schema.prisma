@@ -44,6 +44,7 @@ model User {
   activity      ActivityLog[]
   reminders     Reminder[]
   notifications Notification[]
+  savedViews    SavedView[]
 }
 
 model Todo {
@@ -211,6 +212,25 @@ model Reminder {
   @@index([userId])
   @@index([remindAt])
   @@index([sentAt])
+}
+
+// A named, reusable filter combination ("smart list" / saved view) owned by a
+// user. `filters` is free-form JSON holding a subset of the GET /api/todos
+// query params (search, completed, priority, categoryId, tagId, dueFilter,
+// etc.) that the frontend round-trips through its TodoFilters. The shape is
+// validated with Zod (SavedViewFiltersSchema) before it is stored so arbitrary
+// data cannot be persisted.
+model SavedView {
+  id        String   @id @default(cuid())
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // An in-app notification for a user. The in-app transport writes these rows;
