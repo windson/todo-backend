@@ -19,6 +19,16 @@ enum RecurrenceRule {
   MONTHLY
 }
 
+// Delivery channel for a reminder. INAPP writes a Notification row that the
+// frontend surfaces in its notifications bell. EMAIL and PUSH are config-gated
+// transports that no-op/log when their provider env vars are unset (external
+// providers are not reachable in the sandbox).
+enum ReminderChannel {
+  INAPP
+  EMAIL
+  PUSH
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -27,11 +37,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  todos      Todo[]
-  categories Category[]
-  tags       Tag[]
-  comments   Comment[]
-  activity   ActivityLog[]
+  todos         Todo[]
+  categories    Category[]
+  tags          Tag[]
+  comments      Comment[]
+  activity      ActivityLog[]
+  reminders     Reminder[]
+  notifications Notification[]
 }
 
 model Todo {
@@ -73,6 +85,7 @@ model Todo {
   attachments Attachment[]
   comments    Comment[]
   activity    ActivityLog[]
+  reminders   Reminder[]
 
   @@index([userId])
   @@index([categoryId])
@@ -175,4 +188,45 @@ model ActivityLog {
 
   @@index([todoId])
   @@index([userId])
+}
+
+// A scheduled reminder for a todo. A dispatcher (lib/notifications.ts, driven
+// by the /api/reminders/dispatch endpoint which an external scheduler/cron
+// calls in production) finds reminders whose `remindAt` is due and `sentAt` is
+// null, delivers them over the configured `channel`, then stamps `sentAt`.
+model Reminder {
+  id        String          @id @default(cuid())
+  remindAt  DateTime
+  channel   ReminderChannel @default(INAPP)
+  sentAt    DateTime?
+  createdAt DateTime        @default(now())
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([todoId])
+  @@index([userId])
+  @@index([remindAt])
+  @@index([sentAt])
+}
+
+// An in-app notification for a user. The in-app transport writes these rows;
+// the frontend lists the unread ones in a notifications bell and marks them
+// read. `type` is a free-form string (e.g. reminder.due) and `payload` is
+// free-form JSON describing the event (todoId, title, channel, etc.).
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  payload   Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
 }

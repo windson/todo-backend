@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTokenFromRequest, verifyToken } from "@/lib/auth";
+import { getTokenFromRequest, verifyToken, hasValidDispatchSecret } from "@/lib/auth";
 
 const ALLOWED_ORIGINS = [
   "http://localhost:5173",
@@ -51,7 +51,14 @@ export async function middleware(request: NextRequest) {
 
   // Enforce authentication on protected API routes. /api/auth/* and /api/doc
   // remain public.
-  if (!isPublicPath(pathname)) {
+  // The reminder dispatch endpoint is normally behind the user auth guard, but
+  // an external scheduler/cron can also authenticate with a shared secret
+  // header (REMINDER_DISPATCH_SECRET). This does NOT open other routes: only
+  // this exact path is allowed through, and only with a matching secret.
+  const isDispatchWithSecret =
+    pathname === "/api/reminders/dispatch" && hasValidDispatchSecret(request);
+
+  if (!isPublicPath(pathname) && !isDispatchWithSecret) {
     const token = getTokenFromRequest(request);
     const user = token ? await verifyToken(token) : null;
     if (!user) {

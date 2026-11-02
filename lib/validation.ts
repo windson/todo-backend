@@ -107,6 +107,28 @@ export const UpdateCommentSchema = z.object({
   body: z.string().min(1, "Comment body is required").max(2000, "Comment must be 2000 characters or less"),
 });
 
+export const ReminderChannelEnum = z.enum(["INAPP", "EMAIL", "PUSH"]);
+
+export const CreateReminderSchema = z.object({
+  remindAt: z.coerce.date(),
+  channel: ReminderChannelEnum.optional(),
+});
+
+export const UpdateReminderSchema = z.object({
+  remindAt: z.coerce.date().optional(),
+  channel: ReminderChannelEnum.optional(),
+});
+
+export const NotificationQueryParamsSchema = z.object({
+  read: z.enum(["true", "false"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
+
+export const MarkNotificationSchema = z.object({
+  read: z.boolean().optional(),
+});
+
 export const BulkOperationSchema = z.object({
   operation: z.enum(["complete", "uncomplete", "delete"]),
   ids: z.array(z.string()).min(1, "At least one ID is required").max(50, "Cannot process more than 50 items at once"),
@@ -132,5 +154,10 @@ export type BulkOperationInput = z.infer<typeof BulkOperationSchema>;
 export type CreateAttachmentInput = z.infer<typeof CreateAttachmentSchema>;
 export type CreateCommentInput = z.infer<typeof CreateCommentSchema>;
 export type UpdateCommentInput = z.infer<typeof UpdateCommentSchema>;
+export type ReminderChannelInput = z.infer<typeof ReminderChannelEnum>;
+export type CreateReminderInput = z.infer<typeof CreateReminderSchema>;
+export type UpdateReminderInput = z.infer<typeof UpdateReminderSchema>;
+export type NotificationQueryParams = z.infer<typeof NotificationQueryParamsSchema>;
+export type MarkNotificationInput = z.infer<typeof MarkNotificationSchema>;
 export type SignupInput = z.infer<typeof SignupSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;

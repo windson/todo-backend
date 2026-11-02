@@ -19,6 +19,9 @@ export const ActivityAction = {
   COMMENT_DELETED: "comment.deleted",
   ATTACHMENT_ADDED: "attachment.added",
   ATTACHMENT_REMOVED: "attachment.removed",
+  REMINDER_CREATED: "reminder.created",
+  REMINDER_DELETED: "reminder.deleted",
+  REMINDER_DISPATCHED: "reminder.dispatched",
 } as const;
 
 export type ActivityActionValue =

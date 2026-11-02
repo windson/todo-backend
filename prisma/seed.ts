@@ -299,6 +299,33 @@ async function main() {
   });
 
   console.log("Created 1 recurring todo");
+
+  // Add an in-app reminder on the parent todo and an unread notification so the
+  // reminders/notifications feature has seed data to surface.
+  const reminderAt = new Date(now.getTime() + 60 * 60 * 1000); // one hour out
+  await prisma.reminder.create({
+    data: {
+      todoId: parentTodo.id,
+      userId: user.id,
+      remindAt: reminderAt,
+      channel: "INAPP",
+    },
+  });
+
+  await prisma.notification.create({
+    data: {
+      userId: user.id,
+      type: "reminder.due",
+      read: false,
+      payload: {
+        todoId: parentTodo.id,
+        todoTitle: parentTodo.title,
+        channel: "INAPP",
+      },
+    },
+  });
+
+  console.log("Created 1 reminder and 1 unread notification");
   console.log("Seeding completed!");
 }
 

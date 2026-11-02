@@ -323,6 +323,106 @@ const openApiSpec = {
         },
       },
     },
+    "/api/todos/{id}/reminders": {
+      get: {
+        summary: "List a todo's reminders",
+        description: "Return the reminders scheduled on a todo, soonest first. Owner-scoped.",
+        tags: ["Reminders"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "List of reminders", content: { "application/json": { schema: { $ref: "#/components/schemas/ReminderListResponse" } } } },
+          "404": { description: "Todo not found" },
+        },
+      },
+      post: {
+        summary: "Schedule a reminder on a todo",
+        tags: ["Reminders"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/CreateReminder" } } },
+        },
+        responses: {
+          "201": { description: "Created reminder", content: { "application/json": { schema: { $ref: "#/components/schemas/ReminderResponse" } } } },
+          "400": { description: "Validation error" },
+          "404": { description: "Todo not found" },
+        },
+      },
+    },
+    "/api/todos/{id}/reminders/{reminderId}": {
+      patch: {
+        summary: "Update a reminder",
+        tags: ["Reminders"],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "reminderId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/UpdateReminder" } } },
+        },
+        responses: {
+          "200": { description: "Updated reminder", content: { "application/json": { schema: { $ref: "#/components/schemas/ReminderResponse" } } } },
+          "400": { description: "Validation error" },
+          "404": { description: "Todo or reminder not found" },
+        },
+      },
+      delete: {
+        summary: "Delete a reminder",
+        tags: ["Reminders"],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "reminderId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          "200": { description: "Reminder deleted" },
+          "404": { description: "Todo or reminder not found" },
+        },
+      },
+    },
+    "/api/reminders/dispatch": {
+      post: {
+        summary: "Dispatch due reminders",
+        description:
+          "Find reminders whose remindAt has passed and that are not yet sent, deliver each over its channel transport (in-app writes a Notification; email/push are config-gated and no-op when unconfigured), then stamp sentAt. Intended to be called on an interval by an external scheduler/cron in production (there is no in-process scheduler). Protected by the normal user auth guard, or by the REMINDER_DISPATCH_SECRET shared secret sent in the X-Dispatch-Secret header for unattended schedulers.",
+        tags: ["Reminders"],
+        responses: {
+          "200": { description: "Dispatch result", content: { "application/json": { schema: { $ref: "#/components/schemas/DispatchResponse" } } } },
+          "401": { description: "Authentication (or a valid dispatch secret) required" },
+        },
+      },
+    },
+    "/api/notifications": {
+      get: {
+        summary: "List the current user's notifications",
+        description: "Return the authenticated user's notifications, newest first. Pass read=false to return only unread ones. Exposes an X-Total-Count header.",
+        tags: ["Notifications"],
+        parameters: [
+          { name: "read", in: "query", required: false, schema: { type: "string", enum: ["true", "false"] } },
+          { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } },
+          { name: "offset", in: "query", required: false, schema: { type: "integer", minimum: 0 } },
+        ],
+        responses: {
+          "200": { description: "List of notifications", content: { "application/json": { schema: { $ref: "#/components/schemas/NotificationListResponse" } } } },
+        },
+      },
+    },
+    "/api/notifications/{id}": {
+      patch: {
+        summary: "Mark a notification read or unread",
+        description: "Mark the notification read (default) or unread via body { read }. Owner-scoped.",
+        tags: ["Notifications"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: false,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/MarkNotification" } } },
+        },
+        responses: {
+          "200": { description: "Updated notification", content: { "application/json": { schema: { $ref: "#/components/schemas/NotificationResponse" } } } },
+          "404": { description: "Notification not found" },
+        },
+      },
+    },
     "/api/categories": {
       get: {
         summary: "List all categories",
@@ -648,6 +748,92 @@ const openApiSpec = {
           todoId: { type: "string" },
           userId: { type: "string" },
           createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      Reminder: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          remindAt: { type: "string", format: "date-time" },
+          channel: { type: "string", enum: ["INAPP", "EMAIL", "PUSH"] },
+          sentAt: { type: "string", format: "date-time", nullable: true, description: "When the reminder was dispatched, null if still pending" },
+          todoId: { type: "string" },
+          userId: { type: "string" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      CreateReminder: {
+        type: "object",
+        required: ["remindAt"],
+        properties: {
+          remindAt: { type: "string", format: "date-time", description: "When the reminder should fire" },
+          channel: { type: "string", enum: ["INAPP", "EMAIL", "PUSH"], description: "Delivery channel, defaults to INAPP" },
+        },
+      },
+      UpdateReminder: {
+        type: "object",
+        properties: {
+          remindAt: { type: "string", format: "date-time" },
+          channel: { type: "string", enum: ["INAPP", "EMAIL", "PUSH"] },
+        },
+      },
+      Notification: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          type: { type: "string", description: "e.g. reminder.due" },
+          payload: { type: "object", nullable: true, additionalProperties: true },
+          read: { type: "boolean" },
+          userId: { type: "string" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      MarkNotification: {
+        type: "object",
+        properties: {
+          read: { type: "boolean", description: "Target read state; defaults to true" },
+        },
+      },
+      DispatchResult: {
+        type: "object",
+        properties: {
+          dispatched: { type: "integer", description: "How many due reminders were processed" },
+          reminderIds: { type: "array", items: { type: "string" } },
+        },
+      },
+      ReminderListResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { type: "array", items: { $ref: "#/components/schemas/Reminder" } },
+        },
+      },
+      ReminderResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/Reminder" },
+        },
+      },
+      NotificationListResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { type: "array", items: { $ref: "#/components/schemas/Notification" } },
+        },
+      },
+      NotificationResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/Notification" },
+        },
+      },
+      DispatchResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/DispatchResult" },
         },
       },
       CommentListResponse: {

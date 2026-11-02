@@ -115,6 +115,25 @@ export async function requireUser(
   return user;
 }
 
+/**
+ * Header a scheduler/cron presents to call the reminder dispatch endpoint
+ * without a user session.
+ */
+export const DISPATCH_SECRET_HEADER = "x-dispatch-secret";
+
+/**
+ * Whether a request carries a valid reminder-dispatch shared secret. Used to
+ * let an external scheduler/cron trigger /api/reminders/dispatch without a user
+ * session. Returns false when REMINDER_DISPATCH_SECRET is unset so the endpoint
+ * stays protected by the normal auth guard by default.
+ */
+export function hasValidDispatchSecret(request: NextRequest): boolean {
+  const configured = process.env.REMINDER_DISPATCH_SECRET;
+  if (!configured) return false;
+  const provided = request.headers.get(DISPATCH_SECRET_HEADER);
+  return Boolean(provided) && provided === configured;
+}
+
 /** Cookie options for the session cookie, shared by login/signup/logout. */
 export function sessionCookieOptions(maxAge: number) {
   return {
