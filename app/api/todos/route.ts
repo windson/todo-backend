@@ -71,10 +71,19 @@ export async function GET(request: NextRequest) {
     }
 
     if (search) {
-      where.OR = [
-        { title: { contains: search, mode: "insensitive" } },
-        { description: { contains: search, mode: "insensitive" } },
-      ];
+      // Combine the search terms with the existing access-scoping clause under
+      // `AND` instead of overwriting `where.OR`. Overwriting `OR` would drop the
+      // owner/share tenant-scope from accessibleTodoWhere and leak other users'
+      // todos for any `?search=` request.
+      const searchClause: Prisma.TodoWhereInput = {
+        OR: [
+          { title: { contains: search, mode: "insensitive" } },
+          { description: { contains: search, mode: "insensitive" } },
+        ],
+      };
+      where.AND = where.AND
+        ? [...(Array.isArray(where.AND) ? where.AND : [where.AND]), searchClause]
+        : [searchClause];
     }
 
     if (completed !== undefined) {
