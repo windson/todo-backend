@@ -144,3 +144,59 @@ describe("POST /api/todos/bulk - caps and existing operations", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("POST /api/todos/bulk - setAssignee", () => {
+  it("clears the assignee on owned todos when assigneeId is null", async () => {
+    prismaMock.todo.findMany.mockResolvedValue([{ id: "a", title: "A" }] as never);
+    prismaMock.todo.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    const res = await POST(makeRequest({ operation: "setAssignee", ids: ["a"], assigneeId: null }));
+
+    expect(res.status).toBe(200);
+    const updateArg = prismaMock.todo.updateMany.mock.calls[0][0];
+    expect(updateArg.data).toEqual({ assigneeId: null });
+    // No share lookup needed when clearing.
+    expect(prismaMock.todoShare.findMany).not.toHaveBeenCalled();
+  });
+
+  it("assigns the owner to their own todos without a share lookup", async () => {
+    prismaMock.todo.findMany.mockResolvedValue([{ id: "a", title: "A" }] as never);
+    prismaMock.todo.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    const res = await POST(makeRequest({ operation: "setAssignee", ids: ["a"], assigneeId: "user-1" }));
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.todoShare.findMany).not.toHaveBeenCalled();
+  });
+
+  it("assigns a shared user when they are shared on every affected todo", async () => {
+    prismaMock.todo.findMany.mockResolvedValue([
+      { id: "a", title: "A" },
+      { id: "b", title: "B" },
+    ] as never);
+    prismaMock.todoShare.findMany.mockResolvedValue([
+      { todoId: "a" },
+      { todoId: "b" },
+    ] as never);
+    prismaMock.todo.updateMany.mockResolvedValue({ count: 2 } as never);
+
+    const res = await POST(makeRequest({ operation: "setAssignee", ids: ["a", "b"], assigneeId: "editor" }));
+
+    expect(res.status).toBe(200);
+    // Notifies the assignee for each affected todo.
+    expect(prismaMock.notification.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects assigning a user not shared on all affected todos (400)", async () => {
+    prismaMock.todo.findMany.mockResolvedValue([
+      { id: "a", title: "A" },
+      { id: "b", title: "B" },
+    ] as never);
+    prismaMock.todoShare.findMany.mockResolvedValue([{ todoId: "a" }] as never);
+
+    const res = await POST(makeRequest({ operation: "setAssignee", ids: ["a", "b"], assigneeId: "editor" }));
+
+    expect(res.status).toBe(400);
+    expect(prismaMock.todo.updateMany).not.toHaveBeenCalled();
+  });
+});

@@ -4,23 +4,22 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { UpdateReminderSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { requireTodoRead } from "@/lib/todo-access";
 import { logActivity, ActivityAction } from "@/lib/activity";
 
 type RouteContext = { params: Promise<{ id: string; reminderId: string }> };
 
 /**
- * Load the reminder and verify both its parent todo and the reminder itself
- * belong to the authenticated user, throwing ApiError.notFound otherwise.
+ * Verify the user may access the parent todo (owner or shared) and owns the
+ * reminder itself. Reminders are personal, so a user may only touch their own,
+ * throwing ApiError.notFound otherwise.
  */
 async function requireOwnedReminder(
   todoId: string,
   reminderId: string,
   userId: string
 ) {
-  const todo = await prisma.todo.findFirst({ where: { id: todoId, userId } });
-  if (!todo) {
-    throw ApiError.notFound("Todo not found");
-  }
+  await requireTodoRead(prisma, todoId, userId);
 
   const reminder = await prisma.reminder.findFirst({
     where: { id: reminderId, todoId, userId },

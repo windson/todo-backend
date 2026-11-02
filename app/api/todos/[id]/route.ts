@@ -7,6 +7,8 @@ import { requireUser } from "@/lib/auth";
 import { formatTodo, todoInclude } from "@/lib/todo-format";
 import { generateNextOccurrence } from "@/lib/recurrence-service";
 import { logActivity, ActivityAction } from "@/lib/activity";
+import { requireTodoRead, requireTodoWrite, requireTodoManage, isAssigneeAllowed } from "@/lib/todo-access";
+import { notifyAssigned } from "@/lib/collaboration-notify";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -18,8 +20,11 @@ export async function GET(
     const { userId } = await requireUser(request);
     const { id } = await context.params;
 
-    const todo = await prisma.todo.findFirst({
-      where: { id, userId },
+    // Owner OR a user the todo is shared with may read it.
+    await requireTodoRead(prisma, id, userId);
+
+    const todo = await prisma.todo.findUnique({
+      where: { id },
       include: todoInclude,
     });
 
@@ -48,8 +53,12 @@ export async function PATCH(
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const existing = await prisma.todo.findFirst({
-      where: { id, userId },
+    // Owner OR an editor may modify the todo; a viewer gets 403, an unrelated
+    // user gets 404.
+    const access = await requireTodoWrite(prisma, id, userId);
+
+    const existing = await prisma.todo.findUnique({
+      where: { id },
       include: {
         children: { select: { id: true } },
         tags: { select: { tagId: true } },
@@ -61,9 +70,13 @@ export async function PATCH(
 
     const { tagIds, ...updateData } = parsed.data;
 
+    // Category, parent, and tags belong to the todo's OWNER's space, so they
+    // are validated against ownerId (an editor edits within the owner's data).
+    const ownerId = access.ownerId;
+
     if (updateData.categoryId) {
       const category = await prisma.category.findFirst({
-        where: { id: updateData.categoryId, userId },
+        where: { id: updateData.categoryId, userId: ownerId },
       });
       if (!category) {
         throw ApiError.badRequest("Category not found");
@@ -80,7 +93,7 @@ export async function PATCH(
         throw ApiError.badRequest("Cannot move a todo that has subtasks under another todo");
       }
       const parent = await prisma.todo.findFirst({
-        where: { id: updateData.parentId, userId },
+        where: { id: updateData.parentId, userId: ownerId },
       });
       if (!parent) {
         throw ApiError.badRequest("Parent todo not found");
@@ -92,10 +105,21 @@ export async function PATCH(
 
     if (tagIds && tagIds.length > 0) {
       const tags = await prisma.tag.findMany({
-        where: { id: { in: tagIds }, userId },
+        where: { id: { in: tagIds }, userId: ownerId },
       });
       if (tags.length !== tagIds.length) {
         throw ApiError.badRequest("One or more tags not found");
+      }
+    }
+
+    // Assignee must be the owner or a user the todo is shared with. null clears
+    // the assignment.
+    if (updateData.assigneeId) {
+      const allowed = await isAssigneeAllowed(prisma, id, ownerId, updateData.assigneeId);
+      if (!allowed) {
+        throw ApiError.badRequest(
+          "Assignee must be the owner or a user the todo is shared with"
+        );
       }
     }
 
@@ -127,7 +151,9 @@ export async function PATCH(
         recurrenceRule: todo.recurrenceRule,
         recurrenceInterval: todo.recurrenceInterval,
         recurrenceGeneratedId: existing.recurrenceGeneratedId,
-        userId,
+        // The spawned occurrence belongs to the todo's owner, not the acting
+        // editor.
+        userId: ownerId,
         categoryId: todo.categoryId,
         parentId: todo.parentId,
         tags: existing.tags,
@@ -159,6 +185,29 @@ export async function PATCH(
       });
     }
 
+    // Record assignment changes explicitly so they appear in the activity trail
+    // and can trigger a notification for the new assignee.
+    if (updateData.assigneeId !== undefined && updateData.assigneeId !== existing.assigneeId) {
+      if (updateData.assigneeId) {
+        await logActivity(prisma, {
+          todoId: id,
+          userId,
+          action: ActivityAction.TODO_ASSIGNED,
+          metadata: { assigneeId: updateData.assigneeId },
+        });
+        // Notify the new assignee (unless they assigned the todo to themselves).
+        if (updateData.assigneeId !== userId) {
+          await notifyAssigned(updateData.assigneeId, id, todo.title);
+        }
+      } else {
+        await logActivity(prisma, {
+          todoId: id,
+          userId,
+          action: ActivityAction.TODO_UNASSIGNED,
+        });
+      }
+    }
+
     return successResponse(formatTodo(todo));
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
@@ -174,7 +223,10 @@ export async function DELETE(
     const { userId } = await requireUser(request);
     const { id } = await context.params;
 
-    const existing = await prisma.todo.findFirst({ where: { id, userId } });
+    // Only the owner may delete a todo (shared editors/viewers cannot).
+    await requireTodoManage(prisma, id, userId);
+
+    const existing = await prisma.todo.findUnique({ where: { id } });
     if (!existing) {
       throw ApiError.notFound("Todo not found");
     }

@@ -4,20 +4,19 @@ import { successResponse, createdResponse, errorResponse } from "@/lib/api-respo
 import { ApiError } from "@/lib/errors";
 import { CreateCommentSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { requireTodoRead, requireTodoWrite } from "@/lib/todo-access";
 import { logActivity, ActivityAction } from "@/lib/activity";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-/** List the comment thread for a todo (owner-scoped). */
+/** List the comment thread for a todo (owner or shared user). */
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { userId } = await requireUser(request);
     const { id } = await context.params;
 
-    const todo = await prisma.todo.findFirst({ where: { id, userId } });
-    if (!todo) {
-      throw ApiError.notFound("Todo not found");
-    }
+    // Any user who can read the todo (owner, editor, viewer) can read comments.
+    await requireTodoRead(prisma, id, userId);
 
     const comments = await prisma.comment.findMany({
       where: { todoId: id },
@@ -43,10 +42,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const todo = await prisma.todo.findFirst({ where: { id, userId } });
-    if (!todo) {
-      throw ApiError.notFound("Todo not found");
-    }
+    // Commenting is a write: owner or editor only (viewers are read-only).
+    await requireTodoWrite(prisma, id, userId);
 
     const comment = await prisma.comment.create({
       data: { body: parsed.data.body, todoId: id, userId },

@@ -29,6 +29,17 @@ enum ReminderChannel {
   PUSH
 }
 
+// Role a user holds on a todo that was shared with them.
+// VIEWER  = read-only access (may read the todo and its sub-resources).
+// EDITOR  = may also edit the todo and create/edit its sub-resources
+//           (comments, attachments, reminders, subtasks).
+// The todo's OWNER is implicit (Todo.userId) and always has full control
+// including sharing/unsharing, assigning, and deleting.
+enum ShareRole {
+  VIEWER
+  EDITOR
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -45,6 +56,12 @@ model User {
   reminders     Reminder[]
   notifications Notification[]
   savedViews    SavedView[]
+
+  // Sharing & collaboration (FEAT-008).
+  // Todos this user has been granted access to by another owner.
+  todoShares    TodoShare[]
+  // Todos this user is the assignee of.
+  assignedTodos Todo[]      @relation("TodoAssignee")
 }
 
 model Todo {
@@ -78,6 +95,14 @@ model Todo {
   parent   Todo?   @relation("TodoSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
   children Todo[]  @relation("TodoSubtasks")
 
+  // Sharing & collaboration (FEAT-008).
+  // assigneeId is the user a todo is assigned to. It must be the owner or a
+  // user the todo is shared with (enforced in the route handlers). SetNull so
+  // removing a user's share/account clears the assignment rather than blocking.
+  assigneeId String?
+  assignee   User?       @relation("TodoAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  shares     TodoShare[]
+
   tags TodoTag[]
 
   // Rich content: the `description` field is treated as GitHub-flavoured
@@ -91,10 +116,34 @@ model Todo {
   @@index([userId])
   @@index([categoryId])
   @@index([parentId])
+  @@index([assigneeId])
   @@index([priority])
   @@index([completed])
   @@index([dueDate])
   @@index([startDate])
+}
+
+// A share grants a user (other than the owner) access to a todo at a given
+// role. The pair (todoId, userId) is unique so a user has at most one role per
+// todo. Both sides cascade on delete so removing a todo or a user cleans up its
+// shares. Access resolution (owner OR share-with-sufficient-role) lives in
+// lib/todo-access.ts and is used consistently by every todo route and
+// sub-resource route.
+model TodoShare {
+  id        String    @id @default(cuid())
+  role      ShareRole @default(VIEWER)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([todoId, userId])
+  @@index([todoId])
+  @@index([userId])
 }
 
 model Category {

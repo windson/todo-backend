@@ -132,8 +132,8 @@ describe("PATCH /api/todos/:id completion spawns recurrence", () => {
   }
 
   it("creates the next occurrence when a recurring todo is completed", async () => {
-    // existing lookup (findFirst with children + tags)
-    prismaMock.todo.findFirst.mockResolvedValue(
+    // access resolve + existing lookup (both findUnique with children + tags)
+    prismaMock.todo.findUnique.mockResolvedValue(
       makeTodo({ completed: false, tags: [{ tagId: "tag-1" }], children: [] }) as never
     );
     // the update that completes it
@@ -154,7 +154,7 @@ describe("PATCH /api/todos/:id completion spawns recurrence", () => {
   });
 
   it("does not spawn an occurrence for a non-recurring todo", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(
+    prismaMock.todo.findUnique.mockResolvedValue(
       makeTodo({ completed: false, recurrenceRule: null, tags: [], children: [] }) as never
     );
     prismaMock.todo.update.mockResolvedValue(

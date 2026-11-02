@@ -22,6 +22,11 @@ export const ActivityAction = {
   REMINDER_CREATED: "reminder.created",
   REMINDER_DELETED: "reminder.deleted",
   REMINDER_DISPATCHED: "reminder.dispatched",
+  TODO_SHARED: "todo.shared",
+  TODO_SHARE_UPDATED: "todo.share_updated",
+  TODO_UNSHARED: "todo.unshared",
+  TODO_ASSIGNED: "todo.assigned",
+  TODO_UNASSIGNED: "todo.unassigned",
 } as const;
 
 export type ActivityActionValue =

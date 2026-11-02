@@ -15,6 +15,7 @@ export const CreateTodoSchema = z.object({
   recurrenceInterval: z.number().int().min(1, "Recurrence interval must be at least 1").max(365, "Recurrence interval must be 365 or less").optional(),
   categoryId: z.string().optional(),
   parentId: z.string().optional(),
+  assigneeId: z.string().optional(),
   order: z.number().int().optional(),
   tagIds: z.array(z.string()).optional(),
 });
@@ -30,6 +31,7 @@ export const UpdateTodoSchema = z.object({
   recurrenceInterval: z.number().int().min(1, "Recurrence interval must be at least 1").max(365, "Recurrence interval must be 365 or less").optional(),
   categoryId: z.string().nullable().optional(),
   parentId: z.string().nullable().optional(),
+  assigneeId: z.string().nullable().optional(),
   order: z.number().int().optional(),
   tagIds: z.array(z.string()).optional(),
 });
@@ -65,6 +67,23 @@ export const LoginSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
+export const ShareRoleEnum = z.enum(["VIEWER", "EDITOR"]);
+
+export const CreateShareSchema = z.object({
+  email: z.email("A valid email is required").max(255),
+  role: ShareRoleEnum.optional(),
+});
+
+export const UpdateShareSchema = z.object({
+  role: ShareRoleEnum,
+});
+
+// Invite/sharable-user lookup is by EXACT email only (no partial/directory
+// search), so it can never enumerate the user directory.
+export const SharableUserQuerySchema = z.object({
+  email: z.email("A valid email is required").max(255),
+});
+
 export const TodoQueryParamsSchema = z.object({
   search: z.string().optional(),
   completed: z.enum(["true", "false"]).optional(),
@@ -73,6 +92,13 @@ export const TodoQueryParamsSchema = z.object({
   tagId: z.string().optional(),
   parentId: z.string().optional(),
   includeSubtasks: z.enum(["true", "false"]).optional(),
+  // Sharing & collaboration (FEAT-008).
+  // assigneeId filters to todos assigned to a specific user.
+  assigneeId: z.string().optional(),
+  // sharedWithMe=true narrows the list to todos shared with (not owned by) the
+  // current user; sharedWithMe=false narrows to only owned todos. Omitted =
+  // owned + shared (the default accessible set).
+  sharedWithMe: z.enum(["true", "false"]).optional(),
   dueBefore: z.coerce.date().optional(),
   dueAfter: z.coerce.date().optional(),
   dueFilter: z.enum(["today", "upcoming", "overdue"]).optional(),
@@ -158,6 +184,13 @@ export const BulkOperationSchema = z.discriminatedUnion("operation", [
     ids: bulkIds,
     tagIds: z.array(z.string()).min(1, "At least one tag ID is required"),
   }),
+  z.object({
+    operation: z.literal("setAssignee"),
+    ids: bulkIds,
+    // null clears the assignee; a string assigns a user who owns or is shared
+    // on each affected todo (validated per-todo in the handler).
+    assigneeId: z.string().nullable(),
+  }),
 ]);
 
 // The persisted shape of a SavedView's `filters` JSON. This is a subset of the
@@ -171,6 +204,8 @@ export const SavedViewFiltersSchema = z
     priority: z.string().max(64).optional(),
     categoryId: z.string().optional(),
     tagId: z.string().optional(),
+    assigneeId: z.string().optional(),
+    sharedWithMe: z.enum(["true", "false"]).optional(),
     dueFilter: z.enum(["today", "upcoming", "overdue"]).optional(),
     sortBy: z.enum(["createdAt", "dueDate", "priority", "title"]).optional(),
     sortOrder: z.enum(["asc", "desc"]).optional(),
@@ -217,3 +252,7 @@ export type NotificationQueryParams = z.infer<typeof NotificationQueryParamsSche
 export type MarkNotificationInput = z.infer<typeof MarkNotificationSchema>;
 export type SignupInput = z.infer<typeof SignupSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
+export type ShareRoleInput = z.infer<typeof ShareRoleEnum>;
+export type CreateShareInput = z.infer<typeof CreateShareSchema>;
+export type UpdateShareInput = z.infer<typeof UpdateShareSchema>;
+export type SharableUserQuery = z.infer<typeof SharableUserQuerySchema>;

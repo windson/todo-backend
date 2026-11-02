@@ -29,6 +29,8 @@ function makeTodo(overrides: Record<string, unknown> = {}) {
     categoryId: null,
     parentId: null,
     order: 0,
+    userId: "user-1",
+    shares: [],
     category: null,
     tags: [],
     children: [],
@@ -106,7 +108,7 @@ describe("PATCH /api/todos/:id (subtasks)", () => {
   }
 
   it("rejects making a todo its own parent", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(
+    prismaMock.todo.findUnique.mockResolvedValue(
       makeTodo({ id: "todo-1", children: [] }) as never
     );
 
@@ -126,7 +128,7 @@ describe("PATCH /api/todos/:id (subtasks)", () => {
   });
 
   it("rejects moving a todo that has subtasks under another todo", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(
+    prismaMock.todo.findUnique.mockResolvedValue(
       makeTodo({ id: "todo-1", children: [{ id: "child-1" }] }) as never
     );
 

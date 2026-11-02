@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { formatTodo, todoInclude } from "@/lib/todo-format";
 import { buildDueDateFilter } from "@/lib/todo-filters";
 import { logActivity, ActivityAction } from "@/lib/activity";
+import { accessibleTodoWhere } from "@/lib/todo-access";
 import { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
@@ -28,6 +29,8 @@ export async function GET(request: NextRequest) {
       tagId,
       parentId,
       includeSubtasks,
+      assigneeId,
+      sharedWithMe,
       dueBefore,
       dueAfter,
       dueFilter,
@@ -37,7 +40,19 @@ export async function GET(request: NextRequest) {
       offset = 0,
     } = parsed.data;
 
-    const where: Prisma.TodoWhereInput = { userId };
+    // Base scoping: the list shows todos the user OWNS or that are SHARED with
+    // them (never unrelated todos). `sharedWithMe` narrows that set:
+    // - "true"  -> only todos shared with the user (not owned)
+    // - "false" -> only owned todos
+    // - omitted -> owned + shared (the default accessible set)
+    let where: Prisma.TodoWhereInput;
+    if (sharedWithMe === "true") {
+      where = { userId: { not: userId }, shares: { some: { userId } } };
+    } else if (sharedWithMe === "false") {
+      where = { userId };
+    } else {
+      where = accessibleTodoWhere(userId);
+    }
 
     // Subtask scoping:
     // - `parentId=<id>` lists the children of a specific todo.
@@ -68,6 +83,10 @@ export async function GET(request: NextRequest) {
 
     if (categoryId) {
       where.categoryId = categoryId;
+    }
+
+    if (assigneeId) {
+      where.assigneeId = assigneeId;
     }
 
     if (tagId) {
@@ -162,6 +181,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // On create the todo has no shares yet, so the only assignable user is the
+    // owner (the creator). Reject any other assignee to keep the invariant that
+    // an assignee owns or is shared on the todo.
+    if (todoData.assigneeId && todoData.assigneeId !== userId) {
+      throw ApiError.badRequest(
+        "Assignee must be the owner or a user the todo is shared with"
+      );
+    }
+
     const todo = await prisma.todo.create({
       data: {
         ...todoData,
@@ -179,6 +207,15 @@ export async function POST(request: NextRequest) {
       action: ActivityAction.TODO_CREATED,
       metadata: { title: todo.title },
     });
+
+    if (todo.assigneeId) {
+      await logActivity(prisma, {
+        todoId: todo.id,
+        userId,
+        action: ActivityAction.TODO_ASSIGNED,
+        metadata: { assigneeId: todo.assigneeId },
+      });
+    }
 
     return createdResponse(formatTodo(todo));
   } catch (error) {

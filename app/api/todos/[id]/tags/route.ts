@@ -4,6 +4,7 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { TodoTagsSchema, RemoveTagSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { requireTodoWrite } from "@/lib/todo-access";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -21,16 +22,13 @@ export async function POST(
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const todo = await prisma.todo.findFirst({ where: { id, userId } });
-    if (!todo) {
-      throw ApiError.notFound("Todo not found");
-    }
+    const access = await requireTodoWrite(prisma, id, userId);
 
     const { tagIds } = parsed.data;
 
-    // Verify all tags exist and belong to the user
+    // Verify all tags exist and belong to the todo's owner.
     const tags = await prisma.tag.findMany({
-      where: { id: { in: tagIds }, userId },
+      where: { id: { in: tagIds }, userId: access.ownerId },
     });
     if (tags.length !== tagIds.length) {
       throw ApiError.badRequest("One or more tags not found");
@@ -76,10 +74,7 @@ export async function DELETE(
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const todo = await prisma.todo.findFirst({ where: { id, userId } });
-    if (!todo) {
-      throw ApiError.notFound("Todo not found");
-    }
+    await requireTodoWrite(prisma, id, userId);
 
     const { tagId } = parsed.data;
 

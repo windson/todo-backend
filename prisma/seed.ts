@@ -8,7 +8,9 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log("Seeding database...");
 
-  // Clean existing data
+  // Clean existing data. Most child tables cascade from Todo/User, but clear
+  // the join/share tables explicitly for a deterministic reset.
+  await prisma.todoShare.deleteMany();
   await prisma.todoTag.deleteMany();
   await prisma.todo.deleteMany();
   await prisma.tag.deleteMany();
@@ -26,6 +28,18 @@ async function main() {
   });
 
   console.log(`Created demo user ${user.email}`);
+
+  // Create a second collaborator user so the sharing & assignee feature has
+  // seed data. Credentials: collaborator@example.com / password123.
+  const collaborator = await prisma.user.create({
+    data: {
+      email: "collaborator@example.com",
+      passwordHash,
+      name: "Casey Collaborator",
+    },
+  });
+
+  console.log(`Created collaborator user ${collaborator.email}`);
 
   // Create categories
   const categories = await Promise.all([
@@ -347,6 +361,58 @@ async function main() {
   });
 
   console.log("Created 2 saved views");
+
+  // Sharing & collaboration (FEAT-008): share the parent "Launch marketing
+  // website" todo with the collaborator as an EDITOR and assign it to them.
+  await prisma.todoShare.create({
+    data: {
+      todoId: parentTodo.id,
+      userId: collaborator.id,
+      role: "EDITOR",
+    },
+  });
+
+  await prisma.todo.update({
+    where: { id: parentTodo.id },
+    data: { assigneeId: collaborator.id },
+  });
+
+  await prisma.activityLog.createMany({
+    data: [
+      {
+        todoId: parentTodo.id,
+        userId: user.id,
+        action: "todo.shared",
+        metadata: { sharedWithUserId: collaborator.id, role: "EDITOR" },
+      },
+      {
+        todoId: parentTodo.id,
+        userId: user.id,
+        action: "todo.assigned",
+        metadata: { assigneeId: collaborator.id },
+      },
+    ],
+  });
+
+  // Notify the collaborator that a todo was shared with and assigned to them.
+  await prisma.notification.createMany({
+    data: [
+      {
+        userId: collaborator.id,
+        type: "todo.shared",
+        read: false,
+        payload: { todoId: parentTodo.id, todoTitle: parentTodo.title, role: "EDITOR" },
+      },
+      {
+        userId: collaborator.id,
+        type: "todo.assigned",
+        read: false,
+        payload: { todoId: parentTodo.id, todoTitle: parentTodo.title },
+      },
+    ],
+  });
+
+  console.log("Shared and assigned the launch todo to the collaborator");
   console.log("Seeding completed!");
 }
 

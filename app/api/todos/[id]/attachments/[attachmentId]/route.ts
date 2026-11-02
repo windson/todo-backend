@@ -3,20 +3,18 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { requireUser } from "@/lib/auth";
+import { requireTodoWrite } from "@/lib/todo-access";
 import { logActivity, ActivityAction } from "@/lib/activity";
 
 type RouteContext = { params: Promise<{ id: string; attachmentId: string }> };
 
-/** Remove an attachment reference from a todo (owner-scoped). */
+/** Remove an attachment reference from a todo (owner or editor). */
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { userId } = await requireUser(request);
     const { id, attachmentId } = await context.params;
 
-    const todo = await prisma.todo.findFirst({ where: { id, userId } });
-    if (!todo) {
-      throw ApiError.notFound("Todo not found");
-    }
+    await requireTodoWrite(prisma, id, userId);
 
     const attachment = await prisma.attachment.findFirst({
       where: { id: attachmentId, todoId: id },

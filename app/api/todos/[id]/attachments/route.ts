@@ -4,6 +4,7 @@ import { successResponse, createdResponse, errorResponse } from "@/lib/api-respo
 import { ApiError } from "@/lib/errors";
 import { CreateAttachmentSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { requireTodoRead, requireTodoWrite } from "@/lib/todo-access";
 import { logActivity, ActivityAction } from "@/lib/activity";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -21,10 +22,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { userId } = await requireUser(request);
     const { id } = await context.params;
 
-    const todo = await prisma.todo.findFirst({ where: { id, userId } });
-    if (!todo) {
-      throw ApiError.notFound("Todo not found");
-    }
+    await requireTodoRead(prisma, id, userId);
 
     const attachments = await prisma.attachment.findMany({
       where: { todoId: id },
@@ -50,10 +48,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const todo = await prisma.todo.findFirst({ where: { id, userId } });
-    if (!todo) {
-      throw ApiError.notFound("Todo not found");
-    }
+    await requireTodoWrite(prisma, id, userId);
 
     const attachment = await prisma.attachment.create({
       data: { ...parsed.data, todoId: id },

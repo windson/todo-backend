@@ -16,7 +16,7 @@ function makeRequest(url: string, init?: RequestInit): NextRequest {
   return new NextRequest(new Request(url, { ...init, headers }));
 }
 
-const ownedTodo = { id: "todo-1", userId: "user-1" };
+const ownedTodo = { id: "todo-1", userId: "user-1", shares: [] };
 
 function makeReminder(overrides: Record<string, unknown> = {}) {
   return {
@@ -33,7 +33,7 @@ function makeReminder(overrides: Record<string, unknown> = {}) {
 
 describe("GET /api/todos/:id/reminders", () => {
   it("lists reminders for an owned todo", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.reminder.findMany.mockResolvedValue([makeReminder()] as never);
 
     const res = await GET(makeRequest("http://localhost/api/todos/todo-1/reminders"), {
@@ -46,7 +46,7 @@ describe("GET /api/todos/:id/reminders", () => {
   });
 
   it("returns 404 when the todo is not owned", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(null);
+    prismaMock.todo.findUnique.mockResolvedValue(null);
 
     const res = await GET(makeRequest("http://localhost/api/todos/x/reminders"), {
       params: Promise.resolve({ id: "x" }),
@@ -67,7 +67,7 @@ describe("GET /api/todos/:id/reminders", () => {
 
 describe("POST /api/todos/:id/reminders", () => {
   it("creates a reminder and writes an activity entry", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.reminder.create.mockResolvedValue(makeReminder() as never);
 
     const res = await POST(
@@ -86,7 +86,7 @@ describe("POST /api/todos/:id/reminders", () => {
   });
 
   it("rejects a missing remindAt", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
 
     const res = await POST(
       makeRequest("http://localhost/api/todos/todo-1/reminders", {
@@ -102,7 +102,7 @@ describe("POST /api/todos/:id/reminders", () => {
   });
 
   it("rejects an invalid channel", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
 
     const res = await POST(
       makeRequest("http://localhost/api/todos/todo-1/reminders", {
@@ -117,7 +117,7 @@ describe("POST /api/todos/:id/reminders", () => {
   });
 
   it("returns 404 when the todo is not owned", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(null);
+    prismaMock.todo.findUnique.mockResolvedValue(null);
 
     const res = await POST(
       makeRequest("http://localhost/api/todos/x/reminders", {
@@ -134,7 +134,7 @@ describe("POST /api/todos/:id/reminders", () => {
 
 describe("PATCH/DELETE /api/todos/:id/reminders/:reminderId", () => {
   it("updates an owned reminder", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.reminder.findFirst.mockResolvedValue(makeReminder() as never);
     prismaMock.reminder.update.mockResolvedValue(makeReminder({ channel: "EMAIL" }) as never);
 
@@ -153,7 +153,7 @@ describe("PATCH/DELETE /api/todos/:id/reminders/:reminderId", () => {
   });
 
   it("returns 404 updating a reminder the user does not own", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.reminder.findFirst.mockResolvedValue(null);
 
     const res = await PATCH(
@@ -170,7 +170,7 @@ describe("PATCH/DELETE /api/todos/:id/reminders/:reminderId", () => {
   });
 
   it("deletes an owned reminder and logs activity", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.reminder.findFirst.mockResolvedValue(makeReminder() as never);
     prismaMock.reminder.delete.mockResolvedValue(makeReminder() as never);
 

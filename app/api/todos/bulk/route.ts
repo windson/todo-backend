@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/errors";
 import { BulkOperationSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
 import { generateNextOccurrence } from "@/lib/recurrence-service";
+import { notifyAssigned } from "@/lib/collaboration-notify";
 
 export async function POST(request: NextRequest) {
   try {
@@ -97,6 +98,50 @@ export async function POST(request: NextRequest) {
         return successResponse({
           message: `Removed ${result.count} tag association(s) from ${ownedTodos.length} todo(s)`,
           count: ownedTodos.length,
+        });
+      }
+
+      case "setAssignee": {
+        const { assigneeId } = parsed.data;
+        // Bulk assign only touches todos the user OWNS. A null assigneeId
+        // clears the assignment; a non-null one must be the owner themselves OR
+        // a user who is shared on every affected owned todo.
+        const ownedTodos = await prisma.todo.findMany({
+          where: { id: { in: ids }, userId },
+          select: { id: true, title: true },
+        });
+        const ownedIds = ownedTodos.map((todo) => todo.id);
+
+        if (assigneeId !== null && assigneeId !== userId) {
+          // The candidate must be shared on all affected todos.
+          const shares = await prisma.todoShare.findMany({
+            where: { todoId: { in: ownedIds }, userId: assigneeId },
+            select: { todoId: true },
+          });
+          if (shares.length !== ownedIds.length) {
+            throw ApiError.badRequest(
+              "Assignee must be the owner or a user every selected todo is shared with"
+            );
+          }
+        }
+
+        const result = await prisma.todo.updateMany({
+          where: { id: { in: ownedIds }, userId },
+          data: { assigneeId },
+        });
+
+        // Notify the assignee (unless they assigned to themselves).
+        if (assigneeId && assigneeId !== userId) {
+          for (const todo of ownedTodos) {
+            await notifyAssigned(assigneeId, todo.id, todo.title);
+          }
+        }
+
+        return successResponse({
+          message: assigneeId
+            ? `${result.count} todo(s) assigned`
+            : `${result.count} todo(s) unassigned`,
+          count: result.count,
         });
       }
 

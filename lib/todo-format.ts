@@ -45,15 +45,31 @@ export function formatTodo<T extends RawTodo>(todo: T) {
   };
 }
 
+/**
+ * Minimal public user projection used for assignee and share members. Never
+ * exposes passwordHash or other sensitive fields.
+ */
+const publicUserSelect = {
+  id: true,
+  email: true,
+  name: true,
+} satisfies Prisma.UserSelect;
+
 /** Shared include clause so list and detail handlers return identical shapes. */
 export const todoInclude = {
   category: true,
   tags: { include: { tag: true } },
+  assignee: { select: publicUserSelect },
+  shares: {
+    orderBy: { createdAt: "asc" },
+    include: { user: { select: publicUserSelect } },
+  },
   children: {
     orderBy: { order: "asc" },
     include: {
       category: true,
       tags: { include: { tag: true } },
+      assignee: { select: publicUserSelect },
     },
   },
 } satisfies Prisma.TodoInclude;

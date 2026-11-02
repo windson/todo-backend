@@ -4,23 +4,25 @@ import { successResponse, createdResponse, errorResponse } from "@/lib/api-respo
 import { ApiError } from "@/lib/errors";
 import { CreateReminderSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { requireTodoRead, requireTodoWrite } from "@/lib/todo-access";
 import { logActivity, ActivityAction } from "@/lib/activity";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-/** List the reminders scheduled on a todo (owner-scoped, soonest first). */
+/**
+ * List the reminders the current user scheduled on a todo (soonest first).
+ * Reminders are personal, so each user only sees their own even on a shared
+ * todo.
+ */
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { userId } = await requireUser(request);
     const { id } = await context.params;
 
-    const todo = await prisma.todo.findFirst({ where: { id, userId } });
-    if (!todo) {
-      throw ApiError.notFound("Todo not found");
-    }
+    await requireTodoRead(prisma, id, userId);
 
     const reminders = await prisma.reminder.findMany({
-      where: { todoId: id },
+      where: { todoId: id, userId },
       orderBy: { remindAt: "asc" },
     });
 
@@ -43,10 +45,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const todo = await prisma.todo.findFirst({ where: { id, userId } });
-    if (!todo) {
-      throw ApiError.notFound("Todo not found");
-    }
+    await requireTodoWrite(prisma, id, userId);
 
     const reminder = await prisma.reminder.create({
       data: {

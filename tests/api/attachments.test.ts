@@ -13,7 +13,7 @@ function makeRequest(url: string, init?: RequestInit): NextRequest {
   return new NextRequest(new Request(url, { ...init, headers }));
 }
 
-const ownedTodo = { id: "todo-1", userId: "user-1" };
+const ownedTodo = { id: "todo-1", userId: "user-1", shares: [] };
 
 function makeAttachment(overrides: Record<string, unknown> = {}) {
   return {
@@ -30,7 +30,7 @@ function makeAttachment(overrides: Record<string, unknown> = {}) {
 
 describe("POST /api/todos/:id/attachments", () => {
   it("stores an attachment reference and logs the activity", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.attachment.create.mockResolvedValue(makeAttachment() as never);
 
     const res = await POST(
@@ -56,7 +56,7 @@ describe("POST /api/todos/:id/attachments", () => {
   });
 
   it("rejects a non-http(s) URL", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
 
     const res = await POST(
       makeRequest("http://localhost/api/todos/todo-1/attachments", {
@@ -72,7 +72,7 @@ describe("POST /api/todos/:id/attachments", () => {
   });
 
   it("rejects a missing filename", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
 
     const res = await POST(
       makeRequest("http://localhost/api/todos/todo-1/attachments", {
@@ -88,7 +88,7 @@ describe("POST /api/todos/:id/attachments", () => {
   });
 
   it("returns 404 when the todo is not owned", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(null);
+    prismaMock.todo.findUnique.mockResolvedValue(null);
 
     const res = await POST(
       makeRequest("http://localhost/api/todos/other/attachments", {
@@ -106,7 +106,7 @@ describe("POST /api/todos/:id/attachments", () => {
 
 describe("GET /api/todos/:id/attachments", () => {
   it("lists attachment references for an owned todo", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.attachment.findMany.mockResolvedValue([makeAttachment()] as never);
 
     const res = await GET(makeRequest("http://localhost/api/todos/todo-1/attachments"), {
@@ -121,7 +121,7 @@ describe("GET /api/todos/:id/attachments", () => {
 
 describe("DELETE /api/todos/:id/attachments/:attachmentId", () => {
   it("removes an owned attachment", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.attachment.findFirst.mockResolvedValue(makeAttachment() as never);
     prismaMock.attachment.delete.mockResolvedValue(makeAttachment() as never);
 
@@ -139,7 +139,7 @@ describe("DELETE /api/todos/:id/attachments/:attachmentId", () => {
   });
 
   it("returns 404 when the attachment does not belong to the todo", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.attachment.findFirst.mockResolvedValue(null);
 
     const res = await DELETE(

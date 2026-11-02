@@ -15,7 +15,7 @@ function makeRequest(url: string, init?: RequestInit): NextRequest {
   return new NextRequest(new Request(url, { ...init, headers }));
 }
 
-const ownedTodo = { id: "todo-1", userId: "user-1" };
+const ownedTodo = { id: "todo-1", userId: "user-1", shares: [] };
 
 function makeComment(overrides: Record<string, unknown> = {}) {
   return {
@@ -31,7 +31,7 @@ function makeComment(overrides: Record<string, unknown> = {}) {
 
 describe("GET /api/todos/:id/comments", () => {
   it("returns the comment thread for an owned todo", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.comment.findMany.mockResolvedValue([makeComment()] as never);
 
     const res = await GET(makeRequest("http://localhost/api/todos/todo-1/comments"), {
@@ -46,7 +46,7 @@ describe("GET /api/todos/:id/comments", () => {
   });
 
   it("returns 404 when the todo is not owned", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(null);
+    prismaMock.todo.findUnique.mockResolvedValue(null);
 
     const res = await GET(makeRequest("http://localhost/api/todos/other/comments"), {
       params: Promise.resolve({ id: "other" }),
@@ -68,7 +68,7 @@ describe("GET /api/todos/:id/comments", () => {
 
 describe("POST /api/todos/:id/comments", () => {
   it("creates a comment and writes an activity-log entry", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.comment.create.mockResolvedValue(makeComment({ body: "New comment" }) as never);
 
     const res = await POST(
@@ -91,7 +91,7 @@ describe("POST /api/todos/:id/comments", () => {
   });
 
   it("rejects an empty comment body", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
 
     const res = await POST(
       makeRequest("http://localhost/api/todos/todo-1/comments", {
@@ -107,7 +107,7 @@ describe("POST /api/todos/:id/comments", () => {
   });
 
   it("returns 404 when posting to a todo the user does not own", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(null);
+    prismaMock.todo.findUnique.mockResolvedValue(null);
 
     const res = await POST(
       makeRequest("http://localhost/api/todos/other/comments", {
@@ -125,7 +125,7 @@ describe("POST /api/todos/:id/comments", () => {
 
 describe("PATCH /api/todos/:id/comments/:commentId", () => {
   it("updates an owned comment", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.comment.findFirst.mockResolvedValue(makeComment() as never);
     prismaMock.comment.update.mockResolvedValue(makeComment({ body: "Edited" }) as never);
 
@@ -144,7 +144,7 @@ describe("PATCH /api/todos/:id/comments/:commentId", () => {
   });
 
   it("returns 404 when the comment is not owned by the user", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.comment.findFirst.mockResolvedValue(null);
 
     const res = await PATCH(
@@ -163,7 +163,7 @@ describe("PATCH /api/todos/:id/comments/:commentId", () => {
 
 describe("DELETE /api/todos/:id/comments/:commentId", () => {
   it("deletes an owned comment", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.comment.findFirst.mockResolvedValue(makeComment() as never);
     prismaMock.comment.delete.mockResolvedValue(makeComment() as never);
 
@@ -181,7 +181,7 @@ describe("DELETE /api/todos/:id/comments/:commentId", () => {
   });
 
   it("returns 404 when deleting a comment the user does not own", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(ownedTodo as never);
+    prismaMock.todo.findUnique.mockResolvedValue(ownedTodo as never);
     prismaMock.comment.findFirst.mockResolvedValue(null);
 
     const res = await DELETE(

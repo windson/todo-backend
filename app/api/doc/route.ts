@@ -81,6 +81,8 @@ const openApiSpec = {
           { name: "tagId", in: "query", schema: { type: "string" }, description: "Filter by tag ID" },
           { name: "parentId", in: "query", schema: { type: "string" }, description: "List the subtasks (children) of this todo ID" },
           { name: "includeSubtasks", in: "query", schema: { type: "string", enum: ["true", "false"] }, description: "When true, return a flat list including subtasks. By default only top-level todos are returned." },
+          { name: "assigneeId", in: "query", schema: { type: "string" }, description: "Filter to todos assigned to this user ID" },
+          { name: "sharedWithMe", in: "query", schema: { type: "string", enum: ["true", "false"] }, description: "true = only todos shared with (not owned by) you; false = only owned todos; omitted = owned + shared (default)" },
           { name: "dueBefore", in: "query", schema: { type: "string", format: "date-time" }, description: "Filter todos due before this date" },
           { name: "dueAfter", in: "query", schema: { type: "string", format: "date-time" }, description: "Filter todos due after this date" },
           { name: "dueFilter", in: "query", schema: { type: "string", enum: ["today", "upcoming", "overdue"] }, description: "Smart due-date list: today (due today), upcoming (due tomorrow onward), or overdue (due before today)" },
@@ -155,12 +157,13 @@ const openApiSpec = {
               schema: {
                 type: "object",
                 required: ["operation", "ids"],
-                description: "Bulk operation. complete/uncomplete/delete take only ids. setPriority also takes `priority`; setCategory also takes `categoryId` (null clears it); addTags/removeTags also take `tagIds`. Referenced category/tags must belong to the user. Max 50 ids.",
+                description: "Bulk operation. complete/uncomplete/delete take only ids. setPriority also takes `priority`; setCategory also takes `categoryId` (null clears it); addTags/removeTags also take `tagIds`; setAssignee also takes `assigneeId` (null clears it; a user must own or be shared on every affected todo). Referenced category/tags must belong to the user. Max 50 ids.",
                 properties: {
-                  operation: { type: "string", enum: ["complete", "uncomplete", "delete", "setPriority", "setCategory", "addTags", "removeTags"] },
+                  operation: { type: "string", enum: ["complete", "uncomplete", "delete", "setPriority", "setCategory", "addTags", "removeTags", "setAssignee"] },
                   ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 },
                   priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"], description: "Required for setPriority" },
                   categoryId: { type: "string", nullable: true, description: "Required for setCategory; null clears the category" },
+                  assigneeId: { type: "string", nullable: true, description: "Required for setAssignee; null clears the assignee" },
                   tagIds: { type: "array", items: { type: "string" }, minItems: 1, description: "Required for addTags/removeTags" },
                 },
               },
@@ -599,6 +602,80 @@ const openApiSpec = {
         },
       },
     },
+    "/api/todos/{id}/share": {
+      get: {
+        summary: "List a todo's shares (collaborators)",
+        description: "Return the users a todo is shared with and their roles. Any user who can read the todo may list its shares.",
+        tags: ["Sharing"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "List of shares", content: { "application/json": { schema: { $ref: "#/components/schemas/ShareListResponse" } } } },
+          "404": { description: "Todo not found" },
+        },
+      },
+      post: {
+        summary: "Share a todo with a user by exact email",
+        description: "Grant another user access to the todo. Owner only. The invitee is resolved by EXACT email (no directory search). Re-sharing the same user updates their role.",
+        tags: ["Sharing"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/CreateShare" } } },
+        },
+        responses: {
+          "201": { description: "Share created", content: { "application/json": { schema: { $ref: "#/components/schemas/ShareResponse" } } } },
+          "400": { description: "Validation error, or sharing with the owner" },
+          "403": { description: "Only the owner can share" },
+          "404": { description: "Todo not found, or no user with that email" },
+        },
+      },
+    },
+    "/api/todos/{id}/share/{userId}": {
+      patch: {
+        summary: "Change a collaborator's role",
+        description: "Update the role of an existing share. Owner only.",
+        tags: ["Sharing"],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "userId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/UpdateShare" } } },
+        },
+        responses: {
+          "200": { description: "Updated share", content: { "application/json": { schema: { $ref: "#/components/schemas/ShareResponse" } } } },
+          "403": { description: "Only the owner can modify shares" },
+          "404": { description: "Todo or share not found" },
+        },
+      },
+      delete: {
+        summary: "Revoke a collaborator's access (unshare)",
+        description: "Remove a user's access to the todo. Owner only. Any assignment to that user is cleared.",
+        tags: ["Sharing"],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "userId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          "200": { description: "Share removed" },
+          "403": { description: "Only the owner can modify shares" },
+          "404": { description: "Todo or share not found" },
+        },
+      },
+    },
+    "/api/users/lookup": {
+      get: {
+        summary: "Look up a user to share with, by exact email",
+        description: "Resolve a single user by EXACT email for sharing. Returns at most one user's minimal public info (id, email, name), or null. Does NOT support partial search, so it cannot enumerate the user directory. Never returns the requesting user.",
+        tags: ["Sharing"],
+        parameters: [{ name: "email", in: "query", required: true, schema: { type: "string", format: "email" } }],
+        responses: {
+          "200": { description: "The matched user or null", content: { "application/json": { schema: { $ref: "#/components/schemas/SharableUserResponse" } } } },
+          "400": { description: "Invalid email" },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -670,6 +747,9 @@ const openApiSpec = {
           tags: { type: "array", items: { $ref: "#/components/schemas/Tag" } },
           parentId: { type: "string", nullable: true, description: "ID of the parent todo when this todo is a subtask" },
           children: { type: "array", items: { $ref: "#/components/schemas/Todo" }, description: "Direct subtasks of this todo" },
+          assigneeId: { type: "string", nullable: true, description: "ID of the user the todo is assigned to (owner or a shared user)" },
+          assignee: { $ref: "#/components/schemas/PublicUser" },
+          shares: { type: "array", items: { $ref: "#/components/schemas/Share" }, description: "Users the todo is shared with and their roles" },
           progress: {
             type: "object",
             description: "Subtask completion summary for this todo",
@@ -694,6 +774,7 @@ const openApiSpec = {
           recurrenceInterval: { type: "integer", minimum: 1, maximum: 365 },
           categoryId: { type: "string" },
           parentId: { type: "string", description: "Create this todo as a subtask of the given parent todo" },
+          assigneeId: { type: "string", description: "On create only the owner may be the assignee" },
           order: { type: "integer" },
           tagIds: { type: "array", items: { type: "string" } },
         },
@@ -711,8 +792,66 @@ const openApiSpec = {
           recurrenceInterval: { type: "integer", minimum: 1, maximum: 365 },
           categoryId: { type: "string", nullable: true },
           parentId: { type: "string", nullable: true, description: "Reparent this todo under the given parent, or null to make it top-level" },
+          assigneeId: { type: "string", nullable: true, description: "Assign the todo to a user (owner or shared user), or null to unassign" },
           order: { type: "integer" },
           tagIds: { type: "array", items: { type: "string" } },
+        },
+      },
+      PublicUser: {
+        type: "object",
+        description: "Minimal public user info (never exposes passwordHash).",
+        properties: {
+          id: { type: "string" },
+          email: { type: "string", format: "email" },
+          name: { type: "string", nullable: true },
+        },
+      },
+      Share: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          role: { type: "string", enum: ["VIEWER", "EDITOR"], description: "VIEWER = read-only; EDITOR = may edit the todo and its sub-resources" },
+          todoId: { type: "string" },
+          userId: { type: "string" },
+          user: { $ref: "#/components/schemas/PublicUser" },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      CreateShare: {
+        type: "object",
+        required: ["email"],
+        properties: {
+          email: { type: "string", format: "email", maxLength: 255, description: "Exact email of the user to share with" },
+          role: { type: "string", enum: ["VIEWER", "EDITOR"], description: "Defaults to VIEWER" },
+        },
+      },
+      UpdateShare: {
+        type: "object",
+        required: ["role"],
+        properties: {
+          role: { type: "string", enum: ["VIEWER", "EDITOR"] },
+        },
+      },
+      ShareResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/Share" },
+        },
+      },
+      ShareListResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { type: "array", items: { $ref: "#/components/schemas/Share" } },
+        },
+      },
+      SharableUserResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { oneOf: [{ $ref: "#/components/schemas/PublicUser" }, { type: "null" }] },
         },
       },
       Category: {

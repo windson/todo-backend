@@ -70,7 +70,7 @@ describe("lib/activity logActivity", () => {
 
 describe("GET /api/todos/:id/activity", () => {
   it("returns the activity log for an owned todo", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue({ id: "todo-1", userId: "user-1" } as never);
+    prismaMock.todo.findUnique.mockResolvedValue({ id: "todo-1", userId: "user-1" } as never);
     prismaMock.activityLog.findMany.mockResolvedValue([
       { id: "a1", action: "todo.created", metadata: null, todoId: "todo-1", userId: "user-1", createdAt: new Date() },
     ] as never);
@@ -85,7 +85,7 @@ describe("GET /api/todos/:id/activity", () => {
   });
 
   it("returns 404 when the todo is not owned", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(null);
+    prismaMock.todo.findUnique.mockResolvedValue(null);
 
     const res = await GET(makeRequest("http://localhost/api/todos/other/activity"), {
       params: Promise.resolve({ id: "other" }),
@@ -98,7 +98,7 @@ describe("GET /api/todos/:id/activity", () => {
 
 describe("PATCH /api/todos/:id writes activity", () => {
   it("logs a completion when a todo is marked completed", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(
+    prismaMock.todo.findUnique.mockResolvedValue(
       makeTodo({ completed: false, children: [], tags: [] }) as never
     );
     prismaMock.todo.update.mockResolvedValue(makeTodo({ completed: true }) as never);
@@ -119,7 +119,7 @@ describe("PATCH /api/todos/:id writes activity", () => {
   });
 
   it("logs a generic update when non-completion fields change", async () => {
-    prismaMock.todo.findFirst.mockResolvedValue(
+    prismaMock.todo.findUnique.mockResolvedValue(
       makeTodo({ completed: false, children: [], tags: [] }) as never
     );
     prismaMock.todo.update.mockResolvedValue(makeTodo({ title: "Renamed" }) as never);

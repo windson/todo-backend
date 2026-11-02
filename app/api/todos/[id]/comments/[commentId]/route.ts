@@ -4,23 +4,24 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { UpdateCommentSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { requireTodoWrite } from "@/lib/todo-access";
 import { logActivity, ActivityAction } from "@/lib/activity";
 
 type RouteContext = { params: Promise<{ id: string; commentId: string }> };
 
 /**
- * Load the comment and verify both its parent todo and the comment itself
- * belong to the authenticated user, throwing ApiError.notFound otherwise.
+ * Verify the user may write to the parent todo (owner or editor) AND is the
+ * author of the comment. A user may only edit/delete their own comment; the
+ * parent-todo write check keeps viewers out. Throws ApiError.notFound to avoid
+ * leaking the existence of a comment the user may not touch.
  */
 async function requireOwnedComment(
   todoId: string,
   commentId: string,
   userId: string
 ) {
-  const todo = await prisma.todo.findFirst({ where: { id: todoId, userId } });
-  if (!todo) {
-    throw ApiError.notFound("Todo not found");
-  }
+  // Owner or editor of the todo; viewer -> 403, unrelated -> 404.
+  await requireTodoWrite(prisma, todoId, userId);
 
   const comment = await prisma.comment.findFirst({
     where: { id: commentId, todoId, userId },
