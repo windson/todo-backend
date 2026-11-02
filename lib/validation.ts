@@ -2,13 +2,20 @@ import { z } from "zod/v4";
 
 export const PriorityEnum = z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]);
 
+export const RecurrenceRuleEnum = z.enum(["DAILY", "WEEKLY", "MONTHLY"]);
+
 export const CreateTodoSchema = z.object({
   title: z.string().min(1, "Title is required").max(255, "Title must be 255 characters or less"),
   description: z.string().max(1000, "Description must be 1000 characters or less").optional(),
   completed: z.boolean().optional(),
   priority: PriorityEnum.optional(),
+  startDate: z.coerce.date().optional(),
   dueDate: z.coerce.date().optional(),
+  recurrenceRule: RecurrenceRuleEnum.optional(),
+  recurrenceInterval: z.number().int().min(1, "Recurrence interval must be at least 1").max(365, "Recurrence interval must be 365 or less").optional(),
   categoryId: z.string().optional(),
+  parentId: z.string().optional(),
+  assigneeId: z.string().optional(),
   order: z.number().int().optional(),
   tagIds: z.array(z.string()).optional(),
 });
@@ -18,10 +25,20 @@ export const UpdateTodoSchema = z.object({
   description: z.string().max(1000, "Description must be 1000 characters or less").nullable().optional(),
   completed: z.boolean().optional(),
   priority: PriorityEnum.optional(),
+  startDate: z.coerce.date().nullable().optional(),
   dueDate: z.coerce.date().nullable().optional(),
+  recurrenceRule: RecurrenceRuleEnum.nullable().optional(),
+  recurrenceInterval: z.number().int().min(1, "Recurrence interval must be at least 1").max(365, "Recurrence interval must be 365 or less").optional(),
   categoryId: z.string().nullable().optional(),
+  parentId: z.string().nullable().optional(),
+  assigneeId: z.string().nullable().optional(),
   order: z.number().int().optional(),
   tagIds: z.array(z.string()).optional(),
+  // Optimistic concurrency (FEAT-010). When provided, the update is only
+  // applied if the todo's current updatedAt matches this value; otherwise the
+  // handler returns 409. Optional, so omitting it preserves the previous
+  // (unconditional) update behavior. Accepts an ISO date-time string.
+  expectedUpdatedAt: z.coerce.date().optional(),
 });
 
 export const CreateCategorySchema = z.object({
@@ -44,23 +61,222 @@ export const UpdateTagSchema = z.object({
   color: z.string().min(1, "Color is required").max(7, "Color must be a valid hex color").regex(/^#[0-9a-fA-F]{6}$/, "Color must be a valid hex color (e.g. #ff0000)").optional(),
 });
 
+export const SignupSchema = z.object({
+  email: z.email("A valid email is required").max(255),
+  password: z.string().min(8, "Password must be at least 8 characters").max(128, "Password must be 128 characters or less"),
+  name: z.string().min(1).max(100, "Name must be 100 characters or less").optional(),
+});
+
+export const LoginSchema = z.object({
+  email: z.email("A valid email is required"),
+  password: z.string().min(1, "Password is required"),
+});
+
+export const ShareRoleEnum = z.enum(["VIEWER", "EDITOR"]);
+
+export const CreateShareSchema = z.object({
+  email: z.email("A valid email is required").max(255),
+  role: ShareRoleEnum.optional(),
+});
+
+export const UpdateShareSchema = z.object({
+  role: ShareRoleEnum,
+});
+
+// Invite/sharable-user lookup is by EXACT email only (no partial/directory
+// search), so it can never enumerate the user directory.
+export const SharableUserQuerySchema = z.object({
+  email: z.email("A valid email is required").max(255),
+});
+
 export const TodoQueryParamsSchema = z.object({
   search: z.string().optional(),
   completed: z.enum(["true", "false"]).optional(),
   priority: z.string().optional(),
   categoryId: z.string().optional(),
   tagId: z.string().optional(),
+  parentId: z.string().optional(),
+  includeSubtasks: z.enum(["true", "false"]).optional(),
+  // Sharing & collaboration (FEAT-008).
+  // assigneeId filters to todos assigned to a specific user.
+  assigneeId: z.string().optional(),
+  // sharedWithMe=true narrows the list to todos shared with (not owned by) the
+  // current user; sharedWithMe=false narrows to only owned todos. Omitted =
+  // owned + shared (the default accessible set).
+  sharedWithMe: z.enum(["true", "false"]).optional(),
   dueBefore: z.coerce.date().optional(),
   dueAfter: z.coerce.date().optional(),
-  sortBy: z.enum(["createdAt", "dueDate", "priority", "title"]).optional(),
+  dueFilter: z.enum(["today", "upcoming", "overdue"]).optional(),
+  sortBy: z.enum(["createdAt", "dueDate", "priority", "title", "order"]).optional(),
   sortOrder: z.enum(["asc", "desc"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 });
 
-export const BulkOperationSchema = z.object({
-  operation: z.enum(["complete", "uncomplete", "delete"]),
-  ids: z.array(z.string()).min(1, "At least one ID is required").max(50, "Cannot process more than 50 items at once"),
+export const CreateAttachmentSchema = z.object({
+  filename: z.string().min(1, "Filename is required").max(255, "Filename must be 255 characters or less"),
+  url: z.string().min(1, "URL is required").max(2048, "URL must be 2048 characters or less").refine(
+    (value) => {
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    "URL must be a valid http(s) URL",
+  ),
+  mimeType: z.string().max(255, "MIME type must be 255 characters or less").optional(),
+  size: z.number().int().min(0, "Size must be zero or greater").max(5_000_000_000, "Size is too large").optional(),
+});
+
+export const CreateCommentSchema = z.object({
+  body: z.string().min(1, "Comment body is required").max(2000, "Comment must be 2000 characters or less"),
+});
+
+export const UpdateCommentSchema = z.object({
+  body: z.string().min(1, "Comment body is required").max(2000, "Comment must be 2000 characters or less"),
+});
+
+export const ReminderChannelEnum = z.enum(["INAPP", "EMAIL", "PUSH"]);
+
+export const CreateReminderSchema = z.object({
+  remindAt: z.coerce.date(),
+  channel: ReminderChannelEnum.optional(),
+});
+
+export const UpdateReminderSchema = z.object({
+  remindAt: z.coerce.date().optional(),
+  channel: ReminderChannelEnum.optional(),
+});
+
+export const NotificationQueryParamsSchema = z.object({
+  read: z.enum(["true", "false"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
+
+export const MarkNotificationSchema = z.object({
+  read: z.boolean().optional(),
+});
+
+const bulkIds = z
+  .array(z.string())
+  .min(1, "At least one ID is required")
+  .max(50, "Cannot process more than 50 items at once");
+
+// Bulk operations are a discriminated union on `operation` so each variant can
+// carry only the payload it needs. The existing complete/uncomplete/delete
+// operations stay payload-free; the new ones carry the entity they apply.
+export const BulkOperationSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("complete"), ids: bulkIds }),
+  z.object({ operation: z.literal("uncomplete"), ids: bulkIds }),
+  z.object({ operation: z.literal("delete"), ids: bulkIds }),
+  z.object({ operation: z.literal("reorder"), ids: bulkIds }),
+  z.object({ operation: z.literal("setPriority"), ids: bulkIds, priority: PriorityEnum }),
+  z.object({
+    operation: z.literal("setCategory"),
+    ids: bulkIds,
+    // null clears the category; a string assigns a category the user owns.
+    categoryId: z.string().nullable(),
+  }),
+  z.object({
+    operation: z.literal("addTags"),
+    ids: bulkIds,
+    tagIds: z.array(z.string()).min(1, "At least one tag ID is required"),
+  }),
+  z.object({
+    operation: z.literal("removeTags"),
+    ids: bulkIds,
+    tagIds: z.array(z.string()).min(1, "At least one tag ID is required"),
+  }),
+  z.object({
+    operation: z.literal("setAssignee"),
+    ids: bulkIds,
+    // null clears the assignee; a string assigns a user who owns or is shared
+    // on each affected todo (validated per-todo in the handler).
+    assigneeId: z.string().nullable(),
+  }),
+]);
+
+// The persisted shape of a SavedView's `filters` JSON. This is a subset of the
+// GET /api/todos query params (see TodoQueryParamsSchema) that the frontend
+// round-trips through its TodoFilters. Validated on create/update so garbage
+// cannot be stored in the Json column. All fields are optional.
+export const SavedViewFiltersSchema = z
+  .object({
+    search: z.string().max(255).optional(),
+    completed: z.enum(["true", "false"]).optional(),
+    priority: z.string().max(64).optional(),
+    categoryId: z.string().optional(),
+    tagId: z.string().optional(),
+    assigneeId: z.string().optional(),
+    sharedWithMe: z.enum(["true", "false"]).optional(),
+    dueFilter: z.enum(["today", "upcoming", "overdue"]).optional(),
+    sortBy: z.enum(["createdAt", "dueDate", "priority", "title", "order"]).optional(),
+    sortOrder: z.enum(["asc", "desc"]).optional(),
+  })
+  .strict();
+
+export const CreateSavedViewSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less"),
+  filters: SavedViewFiltersSchema,
+});
+
+export const UpdateSavedViewSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less").optional(),
+  filters: SavedViewFiltersSchema.optional(),
+});
+
+// Analytics & data-insight (FEAT-009).
+// Optional query params for GET /api/analytics. `days` controls how far back
+// the completion-trend window reaches (default 30, capped at 365).
+export const AnalyticsQueryParamsSchema = z.object({
+  days: z.coerce.number().int().min(1, "days must be at least 1").max(365, "days must be 365 or less").optional(),
+});
+
+// Export format for GET /api/export. `json` (default) returns the full nested
+// backup; `csv` returns a flat todos CSV.
+export const ExportQueryParamsSchema = z.object({
+  format: z.enum(["json", "csv"]).optional(),
+});
+
+// Import payload (FEAT-009). The JSON import mirrors the export shape: a bundle
+// of the user's categories, tags, and todos. Every record is created for the
+// CURRENT user - any userId/ownership fields in the payload are ignored, so a
+// payload can never write into another user's data. Category/tag names are
+// per-user unique, so duplicates are reused (by name) rather than erroring.
+const ImportColor = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/, "Color must be a valid hex color (e.g. #ff0000)");
+
+export const ImportCategorySchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less"),
+  color: ImportColor.optional(),
+});
+
+export const ImportTagSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be 100 characters or less"),
+  color: ImportColor.optional(),
+});
+
+export const ImportTodoSchema = z.object({
+  title: z.string().min(1, "Title is required").max(255, "Title must be 255 characters or less"),
+  description: z.string().max(1000, "Description must be 1000 characters or less").nullable().optional(),
+  completed: z.boolean().optional(),
+  priority: PriorityEnum.optional(),
+  startDate: z.coerce.date().nullable().optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+  // Referenced by NAME so an import is portable across accounts. Names are
+  // resolved to the current user's categories/tags (created if missing).
+  category: z.string().max(100).nullable().optional(),
+  tags: z.array(z.string().max(100)).optional(),
+});
+
+export const ImportBundleSchema = z.object({
+  categories: z.array(ImportCategorySchema).max(1000, "Too many categories").optional(),
+  tags: z.array(ImportTagSchema).max(1000, "Too many tags").optional(),
+  todos: z.array(ImportTodoSchema).max(5000, "Too many todos").optional(),
 });
 
 export const TodoTagsSchema = z.object({
@@ -71,6 +287,7 @@ export const RemoveTagSchema = z.object({
   tagId: z.string().min(1, "Tag ID is required"),
 });
 
+export type RecurrenceRuleInput = z.infer<typeof RecurrenceRuleEnum>;
 export type CreateTodoInput = z.infer<typeof CreateTodoSchema>;
 export type UpdateTodoInput = z.infer<typeof UpdateTodoSchema>;
 export type CreateCategoryInput = z.infer<typeof CreateCategorySchema>;
@@ -79,3 +296,26 @@ export type CreateTagInput = z.infer<typeof CreateTagSchema>;
 export type UpdateTagInput = z.infer<typeof UpdateTagSchema>;
 export type TodoQueryParams = z.infer<typeof TodoQueryParamsSchema>;
 export type BulkOperationInput = z.infer<typeof BulkOperationSchema>;
+export type SavedViewFilters = z.infer<typeof SavedViewFiltersSchema>;
+export type CreateSavedViewInput = z.infer<typeof CreateSavedViewSchema>;
+export type UpdateSavedViewInput = z.infer<typeof UpdateSavedViewSchema>;
+export type CreateAttachmentInput = z.infer<typeof CreateAttachmentSchema>;
+export type CreateCommentInput = z.infer<typeof CreateCommentSchema>;
+export type UpdateCommentInput = z.infer<typeof UpdateCommentSchema>;
+export type ReminderChannelInput = z.infer<typeof ReminderChannelEnum>;
+export type CreateReminderInput = z.infer<typeof CreateReminderSchema>;
+export type UpdateReminderInput = z.infer<typeof UpdateReminderSchema>;
+export type NotificationQueryParams = z.infer<typeof NotificationQueryParamsSchema>;
+export type MarkNotificationInput = z.infer<typeof MarkNotificationSchema>;
+export type SignupInput = z.infer<typeof SignupSchema>;
+export type LoginInput = z.infer<typeof LoginSchema>;
+export type ShareRoleInput = z.infer<typeof ShareRoleEnum>;
+export type CreateShareInput = z.infer<typeof CreateShareSchema>;
+export type UpdateShareInput = z.infer<typeof UpdateShareSchema>;
+export type SharableUserQuery = z.infer<typeof SharableUserQuerySchema>;
+export type AnalyticsQueryParams = z.infer<typeof AnalyticsQueryParamsSchema>;
+export type ExportQueryParams = z.infer<typeof ExportQueryParamsSchema>;
+export type ImportCategoryInput = z.infer<typeof ImportCategorySchema>;
+export type ImportTagInput = z.infer<typeof ImportTagSchema>;
+export type ImportTodoInput = z.infer<typeof ImportTodoSchema>;
+export type ImportBundleInput = z.infer<typeof ImportBundleSchema>;

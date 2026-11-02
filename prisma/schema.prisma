@@ -13,43 +13,166 @@ enum Priority {
   URGENT
 }
 
+enum RecurrenceRule {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+// Delivery channel for a reminder. INAPP writes a Notification row that the
+// frontend surfaces in its notifications bell. EMAIL and PUSH are config-gated
+// transports that no-op/log when their provider env vars are unset (external
+// providers are not reachable in the sandbox).
+enum ReminderChannel {
+  INAPP
+  EMAIL
+  PUSH
+}
+
+// Role a user holds on a todo that was shared with them.
+// VIEWER  = read-only access (may read the todo and its sub-resources).
+// EDITOR  = may also edit the todo and create/edit its sub-resources
+//           (comments, attachments, reminders, subtasks).
+// The todo's OWNER is implicit (Todo.userId) and always has full control
+// including sharing/unsharing, assigning, and deleting.
+enum ShareRole {
+  VIEWER
+  EDITOR
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  todos         Todo[]
+  categories    Category[]
+  tags          Tag[]
+  comments      Comment[]
+  activity      ActivityLog[]
+  reminders     Reminder[]
+  notifications Notification[]
+  savedViews    SavedView[]
+
+  // Sharing & collaboration (FEAT-008).
+  // Todos this user has been granted access to by another owner.
+  todoShares    TodoShare[]
+  // Todos this user is the assignee of.
+  assignedTodos Todo[]      @relation("TodoAssignee")
+}
+
 model Todo {
   id          String    @id @default(cuid())
   title       String
   description String?
   completed   Boolean   @default(false)
   priority    Priority  @default(MEDIUM)
+  startDate   DateTime?
   dueDate     DateTime?
   order       Int       @default(0)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  // Recurrence: when recurrenceRule is set, completing this todo generates the
+  // next occurrence with dates advanced by `recurrenceInterval` units of the
+  // rule's frequency. recurrenceGeneratedId records the id of the occurrence
+  // that was spawned so completing the same todo twice does not create
+  // duplicates (the second completion is a no-op for generation).
+  recurrenceRule        RecurrenceRule?
+  recurrenceInterval    Int             @default(1)
+  recurrenceGeneratedId String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id])
 
+  parentId String?
+  parent   Todo?   @relation("TodoSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  children Todo[]  @relation("TodoSubtasks")
+
+  // Sharing & collaboration (FEAT-008).
+  // assigneeId is the user a todo is assigned to. It must be the owner or a
+  // user the todo is shared with (enforced in the route handlers). SetNull so
+  // removing a user's share/account clears the assignment rather than blocking.
+  assigneeId String?
+  assignee   User?       @relation("TodoAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  shares     TodoShare[]
+
   tags TodoTag[]
 
+  // Rich content: the `description` field is treated as GitHub-flavoured
+  // markdown by the clients (rendered sanitized on the frontend). No schema
+  // change is needed for that convention beyond this note.
+  attachments Attachment[]
+  comments    Comment[]
+  activity    ActivityLog[]
+  reminders   Reminder[]
+
+  @@index([userId])
   @@index([categoryId])
+  @@index([parentId])
+  @@index([assigneeId])
   @@index([priority])
   @@index([completed])
   @@index([dueDate])
+  @@index([startDate])
+}
+
+// A share grants a user (other than the owner) access to a todo at a given
+// role. The pair (todoId, userId) is unique so a user has at most one role per
+// todo. Both sides cascade on delete so removing a todo or a user cleans up its
+// shares. Access resolution (owner OR share-with-sufficient-role) lives in
+// lib/todo-access.ts and is used consistently by every todo route and
+// sub-resource route.
+model TodoShare {
+  id        String    @id @default(cuid())
+  role      ShareRole @default(VIEWER)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([todoId, userId])
+  @@index([todoId])
+  @@index([userId])
 }
 
 model Category {
   id        String   @id @default(cuid())
-  name      String   @unique
+  name      String
   color     String
   createdAt DateTime @default(now())
 
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   todos Todo[]
+
+  @@unique([userId, name])
+  @@index([userId])
 }
 
 model Tag {
   id    String @id @default(cuid())
-  name  String @unique
+  name  String
   color String
 
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   todos TodoTag[]
+
+  @@unique([userId, name])
+  @@index([userId])
 }
 
 model TodoTag {
@@ -62,4 +185,117 @@ model TodoTag {
   @@id([todoId, tagId])
   @@index([todoId])
   @@index([tagId])
+}
+
+// A file-style attachment on a todo. The sandbox has no object store / outbound
+// network, so attachments store a URL/filename REFERENCE only (metadata). Real
+// binary upload to an object store is deferred and config-gated.
+model Attachment {
+  id        String   @id @default(cuid())
+  filename  String
+  url       String
+  mimeType  String?
+  size      Int?
+  createdAt DateTime @default(now())
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  @@index([todoId])
+}
+
+// A user-authored comment on a todo's thread.
+model Comment {
+  id        String   @id @default(cuid())
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([todoId])
+  @@index([userId])
+}
+
+// An append-only record of changes to a todo (created/updated/completed/
+// deleted and comment/attachment changes). `metadata` is free-form JSON that
+// describes the change (e.g. which fields changed, the comment id, etc.).
+model ActivityLog {
+  id        String   @id @default(cuid())
+  action    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([todoId])
+  @@index([userId])
+}
+
+// A scheduled reminder for a todo. A dispatcher (lib/notifications.ts, driven
+// by the /api/reminders/dispatch endpoint which an external scheduler/cron
+// calls in production) finds reminders whose `remindAt` is due and `sentAt` is
+// null, delivers them over the configured `channel`, then stamps `sentAt`.
+model Reminder {
+  id        String          @id @default(cuid())
+  remindAt  DateTime
+  channel   ReminderChannel @default(INAPP)
+  sentAt    DateTime?
+  createdAt DateTime        @default(now())
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([todoId])
+  @@index([userId])
+  @@index([remindAt])
+  @@index([sentAt])
+}
+
+// A named, reusable filter combination ("smart list" / saved view) owned by a
+// user. `filters` is free-form JSON holding a subset of the GET /api/todos
+// query params (search, completed, priority, categoryId, tagId, dueFilter,
+// etc.) that the frontend round-trips through its TodoFilters. The shape is
+// validated with Zod (SavedViewFiltersSchema) before it is stored so arbitrary
+// data cannot be persisted.
+model SavedView {
+  id        String   @id @default(cuid())
+  name      String
+  filters   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// An in-app notification for a user. The in-app transport writes these rows;
+// the frontend lists the unread ones in a notifications bell and marks them
+// read. `type` is a free-form string (e.g. reminder.due) and `payload` is
+// free-form JSON describing the event (todoId, title, channel, etc.).
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  payload   Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
 }

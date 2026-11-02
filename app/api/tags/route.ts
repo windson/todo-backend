@@ -3,10 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { successResponse, createdResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { CreateTagSchema } from "@/lib/validation";
+import { requireUser } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const { userId } = await requireUser(request);
     const tags = await prisma.tag.findMany({
+      where: { userId },
       include: {
         _count: { select: { todos: true } },
       },
@@ -28,6 +31,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const { userId } = await requireUser(request);
     const body = await request.json();
     const parsed = CreateTagSchema.safeParse(body);
 
@@ -35,15 +39,15 @@ export async function POST(request: NextRequest) {
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const existing = await prisma.tag.findUnique({
-      where: { name: parsed.data.name },
+    const existing = await prisma.tag.findFirst({
+      where: { userId, name: parsed.data.name },
     });
     if (existing) {
       throw ApiError.conflict("A tag with this name already exists");
     }
 
     const tag = await prisma.tag.create({
-      data: parsed.data,
+      data: { ...parsed.data, userId },
     });
 
     return createdResponse(tag);
