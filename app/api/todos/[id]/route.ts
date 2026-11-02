@@ -6,6 +6,7 @@ import { UpdateTodoSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
 import { formatTodo, todoInclude } from "@/lib/todo-format";
 import { generateNextOccurrence } from "@/lib/recurrence-service";
+import { logActivity, ActivityAction } from "@/lib/activity";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -133,6 +134,31 @@ export async function PATCH(
       });
     }
 
+    // Record the change in the activity log. A completion/uncompletion is
+    // logged with a dedicated action; all other field changes are a generic
+    // update that notes which fields were touched.
+    const becameUncompleted = existing.completed === true && updateData.completed === false;
+    if (becameCompleted) {
+      await logActivity(prisma, {
+        todoId: id,
+        userId,
+        action: ActivityAction.TODO_COMPLETED,
+      });
+    } else if (becameUncompleted) {
+      await logActivity(prisma, {
+        todoId: id,
+        userId,
+        action: ActivityAction.TODO_UNCOMPLETED,
+      });
+    } else {
+      await logActivity(prisma, {
+        todoId: id,
+        userId,
+        action: ActivityAction.TODO_UPDATED,
+        metadata: { fields: Object.keys(parsed.data) },
+      });
+    }
+
     return successResponse(formatTodo(todo));
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
@@ -152,6 +178,17 @@ export async function DELETE(
     if (!existing) {
       throw ApiError.notFound("Todo not found");
     }
+
+    // Record the deletion before removing the todo. The log row is on the todo
+    // itself, so the DB cascade removes it along with the todo; the write is
+    // kept for consistency with the activity-trail convention (and so a future
+    // feature that logs to a user-level trail can reuse the same call site).
+    await logActivity(prisma, {
+      todoId: id,
+      userId,
+      action: ActivityAction.TODO_DELETED,
+      metadata: { title: existing.title },
+    });
 
     await prisma.todo.delete({ where: { id } });
 

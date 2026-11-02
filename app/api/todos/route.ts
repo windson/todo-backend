@@ -6,6 +6,7 @@ import { CreateTodoSchema, TodoQueryParamsSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
 import { formatTodo, todoInclude } from "@/lib/todo-format";
 import { buildDueDateFilter } from "@/lib/todo-filters";
+import { logActivity, ActivityAction } from "@/lib/activity";
 import { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
@@ -170,6 +171,13 @@ export async function POST(request: NextRequest) {
           : undefined,
       },
       include: todoInclude,
+    });
+
+    await logActivity(prisma, {
+      todoId: todo.id,
+      userId,
+      action: ActivityAction.TODO_CREATED,
+      metadata: { title: todo.title },
     });
 
     return createdResponse(formatTodo(todo));

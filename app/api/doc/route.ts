@@ -213,6 +213,116 @@ const openApiSpec = {
         },
       },
     },
+    "/api/todos/{id}/comments": {
+      get: {
+        summary: "List a todo's comment thread",
+        description: "Return the comments on a todo, oldest first. Owner-scoped.",
+        tags: ["Comments"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "List of comments", content: { "application/json": { schema: { $ref: "#/components/schemas/CommentListResponse" } } } },
+          "404": { description: "Todo not found" },
+        },
+      },
+      post: {
+        summary: "Add a comment to a todo",
+        tags: ["Comments"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/CreateComment" } } },
+        },
+        responses: {
+          "201": { description: "Created comment", content: { "application/json": { schema: { $ref: "#/components/schemas/CommentResponse" } } } },
+          "400": { description: "Validation error" },
+          "404": { description: "Todo not found" },
+        },
+      },
+    },
+    "/api/todos/{id}/comments/{commentId}": {
+      patch: {
+        summary: "Edit a comment",
+        tags: ["Comments"],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "commentId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/CreateComment" } } },
+        },
+        responses: {
+          "200": { description: "Updated comment", content: { "application/json": { schema: { $ref: "#/components/schemas/CommentResponse" } } } },
+          "400": { description: "Validation error" },
+          "404": { description: "Todo or comment not found" },
+        },
+      },
+      delete: {
+        summary: "Delete a comment",
+        tags: ["Comments"],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "commentId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          "200": { description: "Comment deleted" },
+          "404": { description: "Todo or comment not found" },
+        },
+      },
+    },
+    "/api/todos/{id}/attachments": {
+      get: {
+        summary: "List a todo's attachment references",
+        description: "Return the attachment metadata references on a todo. Attachments store a URL/filename reference only; binary upload to an object store is deferred and config-gated.",
+        tags: ["Attachments"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "List of attachments", content: { "application/json": { schema: { $ref: "#/components/schemas/AttachmentListResponse" } } } },
+          "404": { description: "Todo not found" },
+        },
+      },
+      post: {
+        summary: "Add an attachment reference to a todo",
+        description: "Store a URL/filename reference as attachment metadata (no binary upload).",
+        tags: ["Attachments"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/CreateAttachment" } } },
+        },
+        responses: {
+          "201": { description: "Created attachment", content: { "application/json": { schema: { $ref: "#/components/schemas/AttachmentResponse" } } } },
+          "400": { description: "Validation error" },
+          "404": { description: "Todo not found" },
+        },
+      },
+    },
+    "/api/todos/{id}/attachments/{attachmentId}": {
+      delete: {
+        summary: "Remove an attachment reference",
+        tags: ["Attachments"],
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string" } },
+          { name: "attachmentId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          "200": { description: "Attachment deleted" },
+          "404": { description: "Todo or attachment not found" },
+        },
+      },
+    },
+    "/api/todos/{id}/activity": {
+      get: {
+        summary: "Read a todo's activity log",
+        description: "Return the append-only activity log for a todo (newest first). Entries are written on todo create/update/complete/delete and on comment/attachment changes.",
+        tags: ["Activity"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "List of activity entries", content: { "application/json": { schema: { $ref: "#/components/schemas/ActivityListResponse" } } } },
+          "404": { description: "Todo not found" },
+        },
+      },
+    },
     "/api/categories": {
       get: {
         summary: "List all categories",
@@ -381,7 +491,7 @@ const openApiSpec = {
         properties: {
           id: { type: "string" },
           title: { type: "string" },
-          description: { type: "string", nullable: true },
+          description: { type: "string", nullable: true, description: "Freeform notes. Treated as GitHub-flavoured markdown; clients render it sanitized." },
           completed: { type: "boolean" },
           priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"] },
           startDate: { type: "string", format: "date-time", nullable: true },
@@ -487,6 +597,92 @@ const openApiSpec = {
         properties: {
           name: { type: "string", minLength: 1, maxLength: 100 },
           color: { type: "string", maxLength: 7 },
+        },
+      },
+      Comment: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          body: { type: "string" },
+          todoId: { type: "string" },
+          userId: { type: "string" },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      CreateComment: {
+        type: "object",
+        required: ["body"],
+        properties: {
+          body: { type: "string", minLength: 1, maxLength: 2000 },
+        },
+      },
+      Attachment: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          filename: { type: "string" },
+          url: { type: "string", description: "A reference URL (http/https). No binary is stored server-side." },
+          mimeType: { type: "string", nullable: true },
+          size: { type: "integer", nullable: true, description: "Size in bytes, if known" },
+          todoId: { type: "string" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      CreateAttachment: {
+        type: "object",
+        required: ["filename", "url"],
+        properties: {
+          filename: { type: "string", minLength: 1, maxLength: 255 },
+          url: { type: "string", maxLength: 2048, description: "An http(s) URL referencing the file" },
+          mimeType: { type: "string", maxLength: 255 },
+          size: { type: "integer", minimum: 0 },
+        },
+      },
+      ActivityLogEntry: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          action: { type: "string", description: "e.g. todo.created, todo.completed, comment.created, attachment.added" },
+          metadata: { type: "object", nullable: true, additionalProperties: true },
+          todoId: { type: "string" },
+          userId: { type: "string" },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      CommentListResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { type: "array", items: { $ref: "#/components/schemas/Comment" } },
+        },
+      },
+      CommentResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/Comment" },
+        },
+      },
+      AttachmentListResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { type: "array", items: { $ref: "#/components/schemas/Attachment" } },
+        },
+      },
+      AttachmentResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { $ref: "#/components/schemas/Attachment" },
+        },
+      },
+      ActivityListResponse: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          data: { type: "array", items: { $ref: "#/components/schemas/ActivityLogEntry" } },
         },
       },
       TodoListResponse: {

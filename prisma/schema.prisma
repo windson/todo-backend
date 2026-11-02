@@ -30,6 +30,8 @@ model User {
   todos      Todo[]
   categories Category[]
   tags       Tag[]
+  comments   Comment[]
+  activity   ActivityLog[]
 }
 
 model Todo {
@@ -64,6 +66,13 @@ model Todo {
   children Todo[]  @relation("TodoSubtasks")
 
   tags TodoTag[]
+
+  // Rich content: the `description` field is treated as GitHub-flavoured
+  // markdown by the clients (rendered sanitized on the frontend). No schema
+  // change is needed for that convention beyond this note.
+  attachments Attachment[]
+  comments    Comment[]
+  activity    ActivityLog[]
 
   @@index([userId])
   @@index([categoryId])
@@ -113,4 +122,57 @@ model TodoTag {
   @@id([todoId, tagId])
   @@index([todoId])
   @@index([tagId])
+}
+
+// A file-style attachment on a todo. The sandbox has no object store / outbound
+// network, so attachments store a URL/filename REFERENCE only (metadata). Real
+// binary upload to an object store is deferred and config-gated.
+model Attachment {
+  id        String   @id @default(cuid())
+  filename  String
+  url       String
+  mimeType  String?
+  size      Int?
+  createdAt DateTime @default(now())
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  @@index([todoId])
+}
+
+// A user-authored comment on a todo's thread.
+model Comment {
+  id        String   @id @default(cuid())
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([todoId])
+  @@index([userId])
+}
+
+// An append-only record of changes to a todo (created/updated/completed/
+// deleted and comment/attachment changes). `metadata` is free-form JSON that
+// describes the change (e.g. which fields changed, the comment id, etc.).
+model ActivityLog {
+  id        String   @id @default(cuid())
+  action    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  todoId String
+  todo   Todo   @relation(fields: [todoId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([todoId])
+  @@index([userId])
 }

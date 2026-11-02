@@ -82,6 +82,31 @@ export const TodoQueryParamsSchema = z.object({
   offset: z.coerce.number().int().min(0).optional(),
 });
 
+export const CreateAttachmentSchema = z.object({
+  filename: z.string().min(1, "Filename is required").max(255, "Filename must be 255 characters or less"),
+  url: z.string().min(1, "URL is required").max(2048, "URL must be 2048 characters or less").refine(
+    (value) => {
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    "URL must be a valid http(s) URL",
+  ),
+  mimeType: z.string().max(255, "MIME type must be 255 characters or less").optional(),
+  size: z.number().int().min(0, "Size must be zero or greater").max(5_000_000_000, "Size is too large").optional(),
+});
+
+export const CreateCommentSchema = z.object({
+  body: z.string().min(1, "Comment body is required").max(2000, "Comment must be 2000 characters or less"),
+});
+
+export const UpdateCommentSchema = z.object({
+  body: z.string().min(1, "Comment body is required").max(2000, "Comment must be 2000 characters or less"),
+});
+
 export const BulkOperationSchema = z.object({
   operation: z.enum(["complete", "uncomplete", "delete"]),
   ids: z.array(z.string()).min(1, "At least one ID is required").max(50, "Cannot process more than 50 items at once"),
@@ -104,5 +129,8 @@ export type CreateTagInput = z.infer<typeof CreateTagSchema>;
 export type UpdateTagInput = z.infer<typeof UpdateTagSchema>;
 export type TodoQueryParams = z.infer<typeof TodoQueryParamsSchema>;
 export type BulkOperationInput = z.infer<typeof BulkOperationSchema>;
+export type CreateAttachmentInput = z.infer<typeof CreateAttachmentSchema>;
+export type CreateCommentInput = z.infer<typeof CreateCommentSchema>;
+export type UpdateCommentInput = z.infer<typeof UpdateCommentSchema>;
 export type SignupInput = z.infer<typeof SignupSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;

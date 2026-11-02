@@ -230,6 +230,57 @@ async function main() {
 
   console.log(`Created 1 parent todo with ${subtasks.length} subtasks`);
 
+  // Add a couple of comments, an attachment reference, and some activity-log
+  // entries to the parent todo to exercise the rich-content feature.
+  await prisma.comment.createMany({
+    data: [
+      {
+        todoId: parentTodo.id,
+        userId: user.id,
+        body: "Kicking this off. See the **brief** in the attached doc.",
+      },
+      {
+        todoId: parentTodo.id,
+        userId: user.id,
+        body: "Copy is drafted, moving on to analytics next.",
+      },
+    ],
+  });
+
+  await prisma.attachment.create({
+    data: {
+      todoId: parentTodo.id,
+      filename: "launch-brief.pdf",
+      url: "https://example.com/files/launch-brief.pdf",
+      mimeType: "application/pdf",
+      size: 248_000,
+    },
+  });
+
+  await prisma.activityLog.createMany({
+    data: [
+      {
+        todoId: parentTodo.id,
+        userId: user.id,
+        action: "todo.created",
+        metadata: { title: parentTodo.title },
+      },
+      {
+        todoId: parentTodo.id,
+        userId: user.id,
+        action: "comment.created",
+      },
+      {
+        todoId: parentTodo.id,
+        userId: user.id,
+        action: "attachment.added",
+        metadata: { filename: "launch-brief.pdf" },
+      },
+    ],
+  });
+
+  console.log("Created comments, an attachment, and activity for the parent todo");
+
   // Create a recurring todo to exercise the recurrence feature. Completing it
   // via the API will spawn the next weekly occurrence.
   await prisma.todo.create({
