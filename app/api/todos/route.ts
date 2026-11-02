@@ -4,6 +4,7 @@ import { successResponse, createdResponse, errorResponse } from "@/lib/api-respo
 import { ApiError } from "@/lib/errors";
 import { CreateTodoSchema, TodoQueryParamsSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { formatTodo, todoInclude } from "@/lib/todo-format";
 import { Prisma } from "@prisma/client";
 
 export async function GET(request: NextRequest) {
@@ -23,6 +24,8 @@ export async function GET(request: NextRequest) {
       priority,
       categoryId,
       tagId,
+      parentId,
+      includeSubtasks,
       dueBefore,
       dueAfter,
       sortBy = "createdAt",
@@ -32,6 +35,17 @@ export async function GET(request: NextRequest) {
     } = parsed.data;
 
     const where: Prisma.TodoWhereInput = { userId };
+
+    // Subtask scoping:
+    // - `parentId=<id>` lists the children of a specific todo.
+    // - default (no parentId, includeSubtasks!=true) returns only top-level
+    //   todos so nested subtasks don't appear twice in the list.
+    // - `includeSubtasks=true` returns a flat list including subtasks.
+    if (parentId !== undefined) {
+      where.parentId = parentId;
+    } else if (includeSubtasks !== "true") {
+      where.parentId = null;
+    }
 
     if (search) {
       where.OR = [
@@ -80,18 +94,12 @@ export async function GET(request: NextRequest) {
         orderBy,
         take: limit,
         skip: offset,
-        include: {
-          category: true,
-          tags: { include: { tag: true } },
-        },
+        include: todoInclude,
       }),
       prisma.todo.count({ where }),
     ]);
 
-    const formattedTodos = todos.map((todo) => ({
-      ...todo,
-      tags: todo.tags.map((tt) => tt.tag),
-    }));
+    const formattedTodos = todos.map((todo) => formatTodo(todo));
 
     return successResponse(formattedTodos, 200, {
       "X-Total-Count": totalCount.toString(),
@@ -123,6 +131,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (todoData.parentId) {
+      const parent = await prisma.todo.findFirst({
+        where: { id: todoData.parentId, userId },
+      });
+      if (!parent) {
+        throw ApiError.badRequest("Parent todo not found");
+      }
+      // Only one level of nesting: a subtask cannot itself have children.
+      if (parent.parentId) {
+        throw ApiError.badRequest("Cannot nest a subtask under another subtask");
+      }
+    }
+
     if (tagIds && tagIds.length > 0) {
       const tags = await prisma.tag.findMany({
         where: { id: { in: tagIds }, userId },
@@ -140,18 +161,10 @@ export async function POST(request: NextRequest) {
           ? { create: tagIds.map((tagId) => ({ tagId })) }
           : undefined,
       },
-      include: {
-        category: true,
-        tags: { include: { tag: true } },
-      },
+      include: todoInclude,
     });
 
-    const formattedTodo = {
-      ...todo,
-      tags: todo.tags.map((tt) => tt.tag),
-    };
-
-    return createdResponse(formattedTodo);
+    return createdResponse(formatTodo(todo));
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
     return errorResponse(ApiError.internal());

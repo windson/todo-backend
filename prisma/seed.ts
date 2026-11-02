@@ -195,6 +195,40 @@ async function main() {
   }
 
   console.log(`Created ${todosData.length} todos`);
+
+  // Create a parent todo with a small checklist of subtasks to exercise the
+  // subtasks / progress feature.
+  const parentTodo = await prisma.todo.create({
+    data: {
+      title: "Launch marketing website",
+      description: "Coordinate the full launch checklist",
+      priority: Priority.HIGH,
+      dueDate: nextWeek,
+      categoryId: categories[0].id,
+      order: 13,
+      userId: user.id,
+    },
+  });
+
+  const subtasks = [
+    { title: "Write landing page copy", completed: true, order: 1 },
+    { title: "Design hero section", completed: true, order: 2 },
+    { title: "Set up analytics", completed: false, order: 3 },
+    { title: "Configure custom domain", completed: false, order: 4 },
+  ];
+
+  for (const subtask of subtasks) {
+    await prisma.todo.create({
+      data: {
+        ...subtask,
+        priority: Priority.MEDIUM,
+        userId: user.id,
+        parentId: parentTodo.id,
+      },
+    });
+  }
+
+  console.log(`Created 1 parent todo with ${subtasks.length} subtasks`);
   console.log("Seeding completed!");
 }
 

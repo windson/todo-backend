@@ -9,6 +9,7 @@ export const CreateTodoSchema = z.object({
   priority: PriorityEnum.optional(),
   dueDate: z.coerce.date().optional(),
   categoryId: z.string().optional(),
+  parentId: z.string().optional(),
   order: z.number().int().optional(),
   tagIds: z.array(z.string()).optional(),
 });
@@ -20,6 +21,7 @@ export const UpdateTodoSchema = z.object({
   priority: PriorityEnum.optional(),
   dueDate: z.coerce.date().nullable().optional(),
   categoryId: z.string().nullable().optional(),
+  parentId: z.string().nullable().optional(),
   order: z.number().int().optional(),
   tagIds: z.array(z.string()).optional(),
 });
@@ -61,6 +63,8 @@ export const TodoQueryParamsSchema = z.object({
   priority: z.string().optional(),
   categoryId: z.string().optional(),
   tagId: z.string().optional(),
+  parentId: z.string().optional(),
+  includeSubtasks: z.enum(["true", "false"]).optional(),
   dueBefore: z.coerce.date().optional(),
   dueAfter: z.coerce.date().optional(),
   sortBy: z.enum(["createdAt", "dueDate", "priority", "title"]).optional(),

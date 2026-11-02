@@ -4,6 +4,7 @@ import { successResponse, errorResponse } from "@/lib/api-response";
 import { ApiError } from "@/lib/errors";
 import { UpdateTodoSchema } from "@/lib/validation";
 import { requireUser } from "@/lib/auth";
+import { formatTodo, todoInclude } from "@/lib/todo-format";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -17,22 +18,14 @@ export async function GET(
 
     const todo = await prisma.todo.findFirst({
       where: { id, userId },
-      include: {
-        category: true,
-        tags: { include: { tag: true } },
-      },
+      include: todoInclude,
     });
 
     if (!todo) {
       throw ApiError.notFound("Todo not found");
     }
 
-    const formattedTodo = {
-      ...todo,
-      tags: todo.tags.map((tt) => tt.tag),
-    };
-
-    return successResponse(formattedTodo);
+    return successResponse(formatTodo(todo));
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
     return errorResponse(ApiError.internal());
@@ -53,7 +46,10 @@ export async function PATCH(
       throw ApiError.badRequest("Validation failed", parsed.error.issues);
     }
 
-    const existing = await prisma.todo.findFirst({ where: { id, userId } });
+    const existing = await prisma.todo.findFirst({
+      where: { id, userId },
+      include: { children: { select: { id: true } } },
+    });
     if (!existing) {
       throw ApiError.notFound("Todo not found");
     }
@@ -66,6 +62,26 @@ export async function PATCH(
       });
       if (!category) {
         throw ApiError.badRequest("Category not found");
+      }
+    }
+
+    if (updateData.parentId) {
+      if (updateData.parentId === id) {
+        throw ApiError.badRequest("A todo cannot be its own parent");
+      }
+      // A todo that already has subtasks cannot itself become a subtask, which
+      // would create a second level of nesting.
+      if (existing.children.length > 0) {
+        throw ApiError.badRequest("Cannot move a todo that has subtasks under another todo");
+      }
+      const parent = await prisma.todo.findFirst({
+        where: { id: updateData.parentId, userId },
+      });
+      if (!parent) {
+        throw ApiError.badRequest("Parent todo not found");
+      }
+      if (parent.parentId) {
+        throw ApiError.badRequest("Cannot nest a subtask under another subtask");
       }
     }
 
@@ -89,18 +105,10 @@ export async function PATCH(
             }
           : undefined,
       },
-      include: {
-        category: true,
-        tags: { include: { tag: true } },
-      },
+      include: todoInclude,
     });
 
-    const formattedTodo = {
-      ...todo,
-      tags: todo.tags.map((tt) => tt.tag),
-    };
-
-    return successResponse(formattedTodo);
+    return successResponse(formatTodo(todo));
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
     return errorResponse(ApiError.internal());

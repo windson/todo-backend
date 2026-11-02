@@ -43,10 +43,15 @@ model Todo {
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id])
 
+  parentId String?
+  parent   Todo?   @relation("TodoSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  children Todo[]  @relation("TodoSubtasks")
+
   tags TodoTag[]
 
   @@index([userId])
   @@index([categoryId])
+  @@index([parentId])
   @@index([priority])
   @@index([completed])
   @@index([dueDate])
