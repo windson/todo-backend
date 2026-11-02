@@ -4,9 +4,9 @@ The `Kiro PR Review` GitHub Actions workflow runs a read-only Kiro CLI agent whe
 
 ## Files
 
-- `.github/workflows/kiro-pr-review.yml` resolves the exact PR revision, keeps trusted automation at the workspace root, checks out untrusted PR code under `review-target/`, invokes Kiro headlessly, and creates or updates one PR comment.
-- `.kiro/agents/pr-reviewer.json` limits the agent to repository reads and gives it focused review instructions.
-- `.github/scripts/extract-kiro-review.py` extracts the final Markdown response from Kiro's `stream-json` output.
+- `.github/workflows/kiro-pr-review.yml` resolves the exact PR revision, keeps trusted automation at the workspace root, checks out untrusted PR code under `review-target/`, invokes Kiro headlessly, and posts each validated finding as an inline review comment on the affected file and line.
+- `.kiro/agents/pr-reviewer.json` limits the agent to repository reads and requires structured findings with diff-relative locations.
+- `.github/scripts/extract-kiro-review.py` extracts Kiro's structured response from `stream-json` output and rejects paths or lines that are not present on the PR diff.
 
 ## Required secret
 
@@ -28,4 +28,4 @@ After the workflow exists on the default branch, review an existing PR with:
 gh workflow run "Kiro PR Review" --repo windson/todo-backend -f pr_number=1
 ```
 
-The workflow updates its prior `<!-- kiro-pr-review -->` comment rather than adding duplicate comments after every push.
+Each actionable finding is attached to its file and line in the pull request diff. A later run replaces prior Kiro inline comments, and a clean review posts no summary comment.
