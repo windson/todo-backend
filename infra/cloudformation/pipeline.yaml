@@ -43,6 +43,20 @@ Resources:
               AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
             Action: "kms:*"
             Resource: "*"
+          # The built .zip is encrypted with this CMK. When the app stack creates
+          # an AWS::Lambda::WebFunctionRevision from the artifact object, the
+          # Lambda Web service principal must be able to decrypt it, otherwise
+          # CreateWebFunctionRevision is rejected. Scoped to this account/region.
+          - Sid: AllowLambdaWebDecryptArtifacts
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
 
   # Server-access log bucket for the artifact bucket (S3_BUCKET_LOGGING_ENABLED).
   # It does not log to itself (that would recurse); this is the standard terminal
@@ -144,6 +158,24 @@ Resources:
             Condition:
               Bool:
                 "aws:SecureTransport": "false"
+          # The app stack creates an AWS::Lambda::WebFunctionRevision whose code
+          # is the built .zip in this bucket. Lambda Web pulls that object using
+          # its service principal, so the bucket policy must grant it read on the
+          # artifact objects. Scoped with aws:SourceArn (ArnLike) to Web Function
+          # revisions in this account/region; the function name and revision id
+          # are wildcarded because the pipeline stack does not know them and
+          # Lambda generates the revision id at create time.
+          - Sid: AllowLambdaWebFunctionCodeAccess
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+            Resource: !Sub "${ArtifactBucket.Arn}/*"
+            Condition:
+              ArnLike:
+                "aws:SourceArn": !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:web-function/*/revision/*"
 
   CodeBuildLogGroup:
     Type: AWS::Logs::LogGroup
@@ -223,6 +255,15 @@ Resources:
                 Action: secretsmanager:GetSecretValue
                 Resource:
                   Fn::ImportValue: !Sub "${DatabaseStackName}-MasterUserSecretArn"
+              # The RDS-managed master secret is encrypted with the data-tier
+              # customer-managed KMS key, so GetSecretValue also needs Decrypt on
+              # that key. Without this, get-secret-value fails with
+              # "Access to KMS is not allowed" and DATABASE_URL is assembled with
+              # empty credentials (Prisma then fails with P1010).
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource:
+                  Fn::ImportValue: !Sub "${DatabaseStackName}-DataKmsKeyArn"
 
   CodeBuildProject:
     Type: AWS::CodeBuild::Project
