@@ -88,13 +88,13 @@ phases:
       # the deployed artifact. Runtime config comes from the Web Function
       # EnvironmentVariables in infra/cloudformation/app.yaml, not a bundled .env.
       - rm -f .next/standalone/.env .next/standalone/.env.* 2>/dev/null || true
-      - test -f .next/standalone/server.js || { echo "ERROR: .next/standalone/server.js missing; is output:'standalone' set in next.config.ts?" >&2; exit 1; }
-      - test -d .next/standalone/node_modules/.prisma/client || { echo "ERROR: generated Prisma client missing from standalone bundle." >&2; exit 1; }
+      - 'test -f .next/standalone/server.js || { echo "ERROR: .next/standalone/server.js missing; is output standalone set in next.config.ts?" >&2; exit 1; }'
+      - 'test -d .next/standalone/node_modules/.prisma/client || { echo "ERROR: generated Prisma client missing from standalone bundle." >&2; exit 1; }'
       - ARTIFACT_KEY="todo-backend/${CODEBUILD_RESOLVED_SOURCE_VERSION}.zip"
       # Zip the CONTENTS of .next/standalone at the archive root (server.js and
       # package.json land at the top level). `cd` keeps paths relative.
       - (cd .next/standalone && zip -r -q "$CODEBUILD_SRC_DIR/app.zip" .)
-      - echo "Uncompressed standalone package size:" && du -sh .next/standalone
+      - 'echo "Uncompressed standalone package size:" && du -sh .next/standalone'
       - aws s3 cp app.zip "s3://${ARTIFACT_BUCKET}/${ARTIFACT_KEY}"
       # Print ONLY the artifact key (not any secret) so an operator can copy it
       # from the build log into the `app` stack's ArtifactObjectKey parameter.
