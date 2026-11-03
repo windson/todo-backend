@@ -29,7 +29,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return successResponse(reminders);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
 
@@ -66,6 +66,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return createdResponse(reminder);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

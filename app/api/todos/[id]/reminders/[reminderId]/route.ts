@@ -56,7 +56,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return successResponse(reminder);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
 
@@ -80,6 +80,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return successResponse({ message: "Reminder deleted successfully" });
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

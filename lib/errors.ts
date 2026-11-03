@@ -29,7 +29,13 @@ export class ApiError extends Error {
     return new ApiError(409, message);
   }
 
-  static internal(message = "Internal server error"): ApiError {
-    return new ApiError(500, message);
+  static internal(message = "Internal server error", cause?: unknown): ApiError {
+    const err = new ApiError(500, message);
+    if (cause !== undefined) {
+      // Preserve the underlying cause for server-side logging. It is never
+      // serialized into the HTTP response, so no internal detail leaks.
+      (err as { cause?: unknown }).cause = cause;
+    }
+    return err;
   }
 }

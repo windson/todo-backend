@@ -37,7 +37,7 @@ export async function GET(
     return successResponse(formatTodo(todo));
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
 
@@ -242,7 +242,7 @@ export async function PATCH(
     return response;
   } catch (error) {
     const response =
-      error instanceof ApiError ? errorResponse(error) : errorResponse(ApiError.internal());
+      error instanceof ApiError ? errorResponse(error) : errorResponse(ApiError.internal(undefined, error));
     logRequest({
       method: "PATCH",
       path: "/api/todos/[id]",
@@ -286,6 +286,6 @@ export async function DELETE(
     return successResponse({ message: "Todo deleted successfully" });
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

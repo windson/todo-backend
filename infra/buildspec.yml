@@ -49,10 +49,63 @@ phases:
 
   post_build:
     commands:
-      # Package only what the Web Function runtime needs. `next start` serves
-      # the build output; prisma/ is included for the generated client + schema.
+      # Package the Next.js STANDALONE server, not the full node_modules.
+      #
+      # WHY: AWS Lambda Web Functions enforce a 512 MB UNCOMPRESSED code-size
+      # limit. Zipping `.next public node_modules ...` produced ~1 GB and was
+      # rejected at CreateWebFunctionRevision ("Uncompressed code size
+      # 1028621809 bytes exceeds the maximum allowed size of 536870912 bytes").
+      # With `output: 'standalone'` in next.config.ts, `next build` emits
+      # `.next/standalone` containing a minimal `server.js` plus only the
+      # node_modules files the routes actually use (Output File Tracing). The
+      # assembled package measures ~140 MB uncompressed - well under the limit.
+      #
+      # LAYOUT (per node_modules/next/dist/docs/.../output.md): the standalone
+      # tracer does NOT copy `public` or `.next/static`; they must be placed at
+      # `.next/standalone/public` and `.next/standalone/.next/static` so the
+      # bundled server serves them. We then zip the CONTENTS of
+      # `.next/standalone` (note the trailing `/.`), so `server.js` and the
+      # copied `package.json` sit at the archive ROOT.
+      #
+      # ENTRYPOINT: the Web Function Node.js runtime loads `index.js` at the
+      # archive ROOT (NOT a package.json `start` script, NOT `next start`). See
+      # https://docs.aws.amazon.com/lambda/latest/dg/web-functions-runtimes.html
+      # and infra/README.md ("The Web Function server process"). We ship a small
+      # committed entry, infra/webfunction/index.js, and copy it to
+      # `.next/standalone/index.js` (next to the standalone `server.js`) in
+      # post_build below. That entry reads AWS_LAMBDA_HTTP_ENDPOINT ("host:port",
+      # which the runtime sets - NOT PORT), maps it onto the HOSTNAME/PORT env
+      # vars that Next's standalone server.js reads at require time, then
+      # `require('./server.js')`. The package.json `start` script (`node
+      # server.js`) is kept for LOCAL use only and is irrelevant to the runtime.
+      #
+      # PRISMA: the app connects with @prisma/client + @prisma/adapter-pg over a
+      # driver adapter (lib/prisma.ts). next.config.ts `outputFileTracingIncludes`
+      # force-includes node_modules/.prisma, @prisma/client, @prisma/adapter-pg
+      # and pg into the trace so the generated client + WASM query compiler land
+      # in `.next/standalone/node_modules`. We assert they are present below and
+      # fail the build if they are missing, rather than shipping a broken zip.
+      - cp -r .next/static .next/standalone/.next/static
+      - '[ -d public ] && cp -r public .next/standalone/public || true'
+      # Place the Web Function entry at the archive root (next to server.js) so
+      # the runtime can load `index.js`. See the ENTRYPOINT note above.
+      - cp infra/webfunction/index.js .next/standalone/index.js
+      # Defense in depth: Next copies any local .env* files into the standalone
+      # output. The pipeline checkout has none (they are gitignored), but strip
+      # them unconditionally so no local/dotenv secret can ever ride along in
+      # the deployed artifact. Runtime config comes from the Web Function
+      # EnvironmentVariables in infra/cloudformation/app.yaml, not a bundled .env.
+      - rm -f .next/standalone/.env .next/standalone/.env.* 2>/dev/null || true
+      - 'test -f .next/standalone/server.js || { echo "ERROR: .next/standalone/server.js missing; is output standalone set in next.config.ts?" >&2; exit 1; }'
+      # The Web Function runtime loads index.js at the package root; fail the
+      # build if it did not make it into the standalone package.
+      - 'test -f .next/standalone/index.js || { echo "ERROR: .next/standalone/index.js missing; the Web Function entry (infra/webfunction/index.js) was not copied into the package." >&2; exit 1; }'
+      - 'test -d .next/standalone/node_modules/.prisma/client || { echo "ERROR: generated Prisma client missing from standalone bundle." >&2; exit 1; }'
       - ARTIFACT_KEY="todo-backend/${CODEBUILD_RESOLVED_SOURCE_VERSION}.zip"
-      - zip -r -q app.zip .next public node_modules package.json next.config.ts prisma
+      # Zip the CONTENTS of .next/standalone at the archive root (server.js and
+      # package.json land at the top level). `cd` keeps paths relative.
+      - (cd .next/standalone && zip -r -q "$CODEBUILD_SRC_DIR/app.zip" .)
+      - 'echo "Uncompressed standalone package size:" && du -sh .next/standalone'
       - aws s3 cp app.zip "s3://${ARTIFACT_BUCKET}/${ARTIFACT_KEY}"
       # Print ONLY the artifact key (not any secret) so an operator can copy it
       # from the build log into the `app` stack's ArtifactObjectKey parameter.

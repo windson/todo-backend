@@ -164,7 +164,7 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (error) {
     const response =
-      error instanceof ApiError ? errorResponse(error) : errorResponse(ApiError.internal());
+      error instanceof ApiError ? errorResponse(error) : errorResponse(ApiError.internal(undefined, error));
     logRequest({
       method: "GET",
       path: "/api/todos",
@@ -258,6 +258,6 @@ export async function POST(request: NextRequest) {
     return createdResponse(formatTodo(todo));
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

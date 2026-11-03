@@ -1,11 +1,14 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  todo-backend networking: a VPC with two private isolated subnets across two
+  todo-backend networking: a VPC with two private subnets across two
   Availability Zones for the Aurora PostgreSQL Serverless v2 cluster, plus the
-  two security groups that wire the Lambda Web Function VPC network-connector to
-  Aurora on port 5432. No public subnets, NAT, or internet gateway are created:
-  the Web Function reaches Aurora over the Lambda-managed network connector ENIs,
-  and the application needs no public egress from the database tier.
+  security groups that wire the Lambda Web Function VPC network-connector and
+  the in-VPC CodeBuild project to Aurora on port 5432. A single public subnet
+  hosts one NAT gateway that gives the private subnets OUTBOUND-ONLY internet
+  egress, which the in-VPC CodeBuild build requires to clone the public GitHub
+  source and install packages from public registries; nothing is reachable from
+  the internet inbound and the Aurora security group stays closed. The Web
+  Function reaches Aurora over the Lambda-managed network connector ENIs.
 
 Parameters:
   VpcCidr:
@@ -23,6 +26,16 @@ Parameters:
     Default: "10.42.2.0/24"
     AllowedPattern: "^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$"
     Description: CIDR block for the second private subnet (AZ 2).
+  PublicSubnetCidr:
+    Type: String
+    Default: "10.42.0.0/24"
+    AllowedPattern: "^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$"
+    Description: >-
+      CIDR block for the single public subnet that hosts the NAT gateway. The
+      NAT gateway gives the otherwise-private subnets outbound-only internet
+      egress so that in-VPC CodeBuild can clone the public GitHub source and
+      install packages from public registries (npm, Bun). No workload runs in
+      this subnet and nothing is reachable from the internet inbound.
 
 Resources:
   Vpc:
@@ -117,6 +130,89 @@ Resources:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable
 
+  # Internet egress for the private subnets. CodeBuild runs inside the VPC (so
+  # `prisma migrate deploy` can reach the private Aurora cluster), but the build
+  # also has to clone the public GitHub source and install packages from public
+  # registries, which require outbound internet access. AWS CodeBuild in a VPC
+  # cannot use an internet gateway directly (it does not support public IPs on
+  # the ENIs it creates) and therefore requires a NAT gateway for egress; see
+  # https://docs.aws.amazon.com/codebuild/latest/userguide/vpc-support.html.
+  # A single public subnet hosts one NAT gateway; the private route table sends
+  # 0.0.0.0/0 to it. This is OUTBOUND-ONLY: nothing is reachable from the
+  # internet inbound, Aurora keeps its closed security group, and the database
+  # subnets remain private.
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-igw"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-nat"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-rt"
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-nat-eip"
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-nat"
+
+  # Outbound-only default route for the private subnets via the NAT gateway.
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway
+
   # SG attached to the Lambda Web Function network-connector ENIs. It needs no
   # ingress; its egress to Aurora is authorized by the Aurora SG ingress rule
   # that references this group.
@@ -177,8 +273,8 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: !Ref VpcCidr
-          Description: Allow HTTPS egress within the VPC to reach the Secrets Manager interface endpoint.
+          CidrIp: "0.0.0.0/0"
+          Description: Allow HTTPS egress to the in-VPC Secrets Manager endpoint and outbound-only internet (via NAT) for GitHub clone and public package registries.
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-codebuild-sg"

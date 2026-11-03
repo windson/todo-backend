@@ -42,7 +42,7 @@ export async function GET(
     return successResponse(formattedCategory);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
 
@@ -82,7 +82,7 @@ export async function PATCH(
     return successResponse(category);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
 
@@ -114,6 +114,6 @@ export async function DELETE(
     return successResponse({ message: "Category deleted successfully" });
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

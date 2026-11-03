@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     return successResponse(views);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
 
@@ -48,6 +48,6 @@ export async function POST(request: NextRequest) {
     return createdResponse(view);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

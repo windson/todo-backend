@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return successResponse(view);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
 
@@ -66,7 +66,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return successResponse(view);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
 
@@ -85,6 +85,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return successResponse({ message: "Saved view deleted successfully" });
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

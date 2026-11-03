@@ -38,7 +38,8 @@ Serverless v2**, with all secrets in **AWS Secrets Manager** and
                                            WebFunctionRevision
                                            (code .zip from S3,
                                             Runtime nodejs24.x,
-                                            `next start` on PORT 8080)
+                                            index.js boots Next standalone
+                                            server.js on AWS_LAMBDA_HTTP_ENDPOINT)
                                                      │
                       EgressNetworkConnectorArn      │  env via resolve:secretsmanager
                                                      ▼
@@ -111,12 +112,46 @@ See [`CUTOVER.md`](./CUTOVER.md) for the full cutover (and optional canary) step
 
 ## The Web Function server process
 
-The Web Function runs the standard `next start` HTTP server (see `package.json`
-`start` script). Next.js reads `PORT` from the environment; the revision sets
-`PORT=8080`, so **no change to `next.config.ts` was required** and none was made
-(per `AGENTS.md`, Next.js runtime/build config is left untouched). `NODE_ENV` is
-set to `production`, which makes the app enforce a real `JWT_SECRET` (it throws
-if unset in production) rather than the dev default.
+The AWS Lambda Web Function **Node.js runtime loads `index.js` at the root of
+the deployment package** by default (or the file named by the
+`AWS_LAMBDA_NODEJS_ENTRYPOINT` env var). It does **not** run a `package.json`
+`start` script and does **not** run `next start`. It also provides the listen
+address as `AWS_LAMBDA_HTTP_ENDPOINT` (`host:port`, e.g. `0.0.0.0:8080`), **not**
+as `PORT`. This is grounded in the official AWS docs:
+
+- <https://docs.aws.amazon.com/lambda/latest/dg/web-functions-runtimes.html>
+- <https://docs.aws.amazon.com/lambda/latest/dg/web-functions-create.html>
+- <https://aws.amazon.com/blogs/compute/exploring-aws-lambda-web-functions-for-building-web-applications/>
+
+> An earlier revision of this stack assumed the runtime ran `next start` and
+> read `PORT`. That assumption was wrong: the live deploy returned HTTP 502 with
+> the runtime log `Runtime.ImportCodeError: could not load customer code: Cannot
+> find module '/var/task/index.js' ... The entrypoint must be 'index.js' at the
+> root of the deployment package, or the AWS_LAMBDA_NODEJS_ENTRYPOINT
+> environment variable must point to your entry file`.
+
+**How this repo conforms.** `next.config.ts` sets `output: 'standalone'`, so
+`next build` emits `.next/standalone/server.js` (CommonJS). That minimal server
+reads `process.env.HOSTNAME` and `process.env.PORT` **at require time** (per
+`node_modules/next/dist/docs/.../output.md`: "define `PORT` or `HOSTNAME`
+environment variables before running `server.js`"). We commit a tiny entry file
+[`infra/webfunction/index.js`](./webfunction/index.js) that:
+
+1. reads `AWS_LAMBDA_HTTP_ENDPOINT` (splitting on the **last** `:` into host and
+   port; fallback `0.0.0.0:8080`),
+2. sets `process.env.HOSTNAME` and `process.env.PORT` from it, then
+3. `require('./server.js')` to boot the Next.js standalone server.
+
+`infra/buildspec.yml` copies that file to `.next/standalone/index.js` (next to
+`server.js`) before zipping the **contents** of `.next/standalone` at the
+archive root, and asserts `index.js` is present before uploading. The runtime
+then loads `index.js` at `/var/task/index.js`.
+
+The `package.json` `start` script (`node server.js`) is kept for **local** use
+only and is irrelevant to the Web Function runtime, which loads `index.js`
+directly. `NODE_ENV` is set to `production`, which makes the app enforce a real
+`JWT_SECRET` (it throws if unset in production) rather than the dev default.
+Per `AGENTS.md`, Next.js runtime/build config is otherwise left untouched.
 
 ## Environment and secret wiring
 
@@ -126,15 +161,32 @@ references, and CodeBuild reads only the one secret it needs for migration:
 
 | Variable | Source | How it reaches the runtime |
 |----------|--------|----------------------------|
-| `DATABASE_URL` | RDS-managed master secret (`username`/`password` keys) + exported cluster endpoint/port/db name | Assembled with `resolve:secretsmanager` inside `app.yaml`; `sslmode=require` |
+| `DB_HOST` | exported cluster endpoint (`Fn::ImportValue`) | plain revision env var |
+| `DB_PORT` | exported cluster port (`Fn::ImportValue`) | plain revision env var |
+| `DB_NAME` | exported database name (`Fn::ImportValue`) | plain revision env var |
+| `DB_USER` | RDS-managed master secret (`username` key) | `resolve:secretsmanager` dynamic reference inside `app.yaml` |
+| `DB_PASSWORD` | RDS-managed master secret (`password` key) | `resolve:secretsmanager` dynamic reference inside `app.yaml` |
+| `DB_SSL` | literal (`require`) | plain revision env var; enables TLS to Aurora |
 | `JWT_SECRET` | `AWS::SecretsManager::Secret` (`GenerateSecretString`) | `resolve:secretsmanager` dynamic reference |
 | `REMINDER_DISPATCH_SECRET` | `AWS::SecretsManager::Secret` (`GenerateSecretString`) | `resolve:secretsmanager` dynamic reference |
-| `PORT`, `NODE_ENV` | literal (`8080`, `production`) | plain revision env vars |
+| `NODE_ENV` | literal (`production`) | plain revision env var |
+| `PORT` | literal (`8080`) | plain revision env var, **secondary fallback only** - the runtime sets `AWS_LAMBDA_HTTP_ENDPOINT` (`host:port`) and `index.js` uses that as the listen address |
 
-The Aurora **master password is generated and stored by RDS**
-(`ManageMasterUserPassword: true`), encrypted with the stack's customer-managed
-KMS key. `DATABASE_URL` is assembled at deploy time from that secret plus the
-exported cluster host/port/database name; it is never stored in plaintext.
+**Why discrete DB params instead of a single `DATABASE_URL`.** The Aurora
+**master password is generated and stored by RDS** (`ManageMasterUserPassword:
+true`), encrypted with the stack's customer-managed KMS key. RDS-generated
+passwords routinely contain URL-unsafe characters (e.g. `! # $ ( - [ _`).
+Assembling a `postgresql://user:password@host/db` URL from such a password
+breaks WHATWG URL parsing in the `pg` driver (the live symptom was an
+`Invalid URL` error on the first query), and `resolve:secretsmanager` cannot
+URL-encode the injected value. Passing the connection as discrete parameters
+lets `pg` receive the password as a literal, so no URL encoding is ever needed.
+`lib/prisma.ts` builds the adapter from these discrete vars in production and
+falls back to a single `DATABASE_URL` for local docker-compose development.
+
+The password is still **never stored in plaintext** in the template: both
+`DB_USER` and `DB_PASSWORD` are injected at deploy time from the RDS-managed
+master secret via `resolve:secretsmanager`.
 
 ## CodeBuild + CodeDeploy flow
 

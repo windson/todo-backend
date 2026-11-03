@@ -2,7 +2,9 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   todo-backend application tier hosted as an AWS Lambda Web Function (new
   capability; AWS::Lambda::WebFunction / WebFunctionRevision / WebFunctionEndpoint).
-  The Web Function server process is `next start` listening on PORT. A Lambda
+  The Web Function Node.js runtime loads index.js at the package root (NOT
+  `next start`) and provides the listen address via AWS_LAMBDA_HTTP_ENDPOINT
+  (host:port); index.js boots the Next.js standalone server on it. A Lambda
   network connector (AWS::Lambda::NetworkConnector) provisions ENIs in the
   private subnets so the function can reach Aurora on 5432. All secret values are
   injected via resolve:secretsmanager dynamic references; no secret is inline.
@@ -32,7 +34,10 @@ Parameters:
   Port:
     Type: String
     Default: "8080"
-    Description: Port the `next start` HTTP server listens on inside the Web Function.
+    Description: >-
+      Secondary PORT fallback for the HTTP server. The Web Function runtime sets
+      AWS_LAMBDA_HTTP_ENDPOINT (host:port), which index.js uses as the source of
+      truth; this PORT env var is only a fallback for parity/local parity.
   TimeoutSeconds:
     Type: Number
     Default: 30
@@ -149,21 +154,33 @@ Resources:
         EgressNetworkConnectorArn: !GetAtt NetworkConnector.LatestVersionArn
         # Secrets are resolved from Secrets Manager at the point of use; no
         # secret literal is stored in the template or the revision definition.
-        # DATABASE_URL is assembled from the RDS-managed master secret
-        # (username/password JSON keys) + the exported cluster endpoint/port/db.
+        # The DB connection is passed as DISCRETE parameters (host/port/db/user/
+        # password) rather than an assembled DATABASE_URL. The RDS-managed master
+        # password can contain URL-unsafe characters, so embedding it in a
+        # postgresql:// URL breaks WHATWG URL parsing in the pg driver; discrete
+        # params feed pg the password as a literal and avoid URL encoding.
         EnvironmentVariables:
           NODE_ENV: production
+          # The runtime sets AWS_LAMBDA_HTTP_ENDPOINT (host:port); index.js uses
+          # it as the listen address. PORT is kept only as a secondary fallback.
           PORT: !Ref Port
-          DATABASE_URL: !Sub
-            - "postgresql://{{resolve:secretsmanager:${MasterSecretArn}:SecretString:username}}:{{resolve:secretsmanager:${MasterSecretArn}:SecretString:password}}@${DbHost}:${DbPort}/${DbName}?sslmode=require"
+          DB_HOST:
+            Fn::ImportValue: !Sub "${DatabaseStackName}-ClusterEndpoint"
+          DB_PORT:
+            Fn::ImportValue: !Sub "${DatabaseStackName}-ClusterPort"
+          DB_NAME:
+            Fn::ImportValue: !Sub "${DatabaseStackName}-DatabaseName"
+          # Username/password still come only from the RDS-managed master secret
+          # via resolve:secretsmanager; never stored in plaintext in the template.
+          DB_USER: !Sub
+            - "{{resolve:secretsmanager:${MasterSecretArn}:SecretString:username}}"
             - MasterSecretArn:
                 Fn::ImportValue: !Sub "${DatabaseStackName}-MasterUserSecretArn"
-              DbHost:
-                Fn::ImportValue: !Sub "${DatabaseStackName}-ClusterEndpoint"
-              DbPort:
-                Fn::ImportValue: !Sub "${DatabaseStackName}-ClusterPort"
-              DbName:
-                Fn::ImportValue: !Sub "${DatabaseStackName}-DatabaseName"
+          DB_PASSWORD: !Sub
+            - "{{resolve:secretsmanager:${MasterSecretArn}:SecretString:password}}"
+            - MasterSecretArn:
+                Fn::ImportValue: !Sub "${DatabaseStackName}-MasterUserSecretArn"
+          DB_SSL: require
           JWT_SECRET: !Sub
             - "{{resolve:secretsmanager:${JwtSecretArn}:SecretString}}"
             - JwtSecretArn:
