@@ -37,6 +37,11 @@ phases:
       - export DB_USER="$(aws secretsmanager get-secret-value --secret-id "$AURORA_SECRET_ARN" --query SecretString --output text | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).username))')"
       - export DB_PASS="$(aws secretsmanager get-secret-value --secret-id "$AURORA_SECRET_ARN" --query SecretString --output text | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(encodeURIComponent(JSON.parse(s).password)))')"
       - export DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require"
+      # Fail loudly if no migration history is committed. `prisma migrate deploy`
+      # only applies files under prisma/migrations and exits 0 when the directory
+      # is empty/absent, which would leave Aurora with zero tables behind a
+      # 'successful' build. Guard against that before deploying.
+      - 'if [ -z "$(find prisma/migrations -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]; then echo "ERROR: prisma/migrations contains no migrations; commit the Prisma migration history before running migrate deploy." >&2; exit 1; fi'
       # Apply committed migrations to Aurora. NOTE: for a PRE-POPULATED database,
       # the multi-tenancy userId backfill caveat in README.md applies - do not
       # run an unedited generated migration that adds a non-nullable userId.

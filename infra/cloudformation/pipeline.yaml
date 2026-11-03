@@ -13,6 +13,9 @@ Description: >-
   specific secret ARN only.
 
 Parameters:
+  NetworkStackName:
+    Type: String
+    Description: Name of the network stack (exports VPC, private subnets + CodeBuild migrate SG for VPC-mode CodeBuild).
   DatabaseStackName:
     Type: String
     Description: Name of the database stack (exports Aurora endpoint + master secret ARN for migrate).
@@ -188,6 +191,28 @@ Resources:
                   - kms:GenerateDataKey
                   - kms:Decrypt
                 Resource: !GetAtt ArtifactKmsKey.Arn
+        - PolicyName: vpc-eni
+          PolicyDocument:
+            Version: "2012-10-17"
+            # Permissions CodeBuild VPC mode requires to create/describe/delete
+            # the ENIs it places in the private subnets.
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeDhcpOptions
+                  - ec2:DescribeVpcs
+                Resource: "*"
+              - Effect: Allow
+                Action: ec2:CreateNetworkInterfacePermission
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+                Condition:
+                  StringEquals:
+                    ec2:AuthorizedService: codebuild.amazonaws.com
         - PolicyName: read-db-secret-for-migrate
           PolicyDocument:
             Version: "2012-10-17"
@@ -209,6 +234,18 @@ Resources:
         Location: !Ref SourceRepositoryUrl
         BuildSpec: infra/buildspec.yml
       SourceVersion: !Ref SourceBranch
+      # Run the build inside the VPC so `prisma migrate deploy` can reach the
+      # private Aurora cluster on 5432. The CodeBuild SG is allowed by the Aurora
+      # SG ingress rule in network.yaml, and a Secrets Manager interface endpoint
+      # (also in network.yaml) lets get-secret-value resolve without NAT.
+      VpcConfig:
+        VpcId:
+          Fn::ImportValue: !Sub "${NetworkStackName}-VpcId"
+        Subnets: !Split
+          - ","
+          - Fn::ImportValue: !Sub "${NetworkStackName}-PrivateSubnetIds"
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub "${NetworkStackName}-CodeBuildSgId"
       Artifacts:
         Type: NO_ARTIFACTS
       EncryptionKey: !GetAtt ArtifactKmsKey.Arn
