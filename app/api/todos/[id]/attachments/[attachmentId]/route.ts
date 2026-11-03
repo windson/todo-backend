@@ -35,6 +35,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return successResponse({ message: "Attachment deleted successfully" });
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

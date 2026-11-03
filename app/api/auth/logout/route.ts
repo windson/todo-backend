@@ -10,7 +10,7 @@ export async function POST() {
     cookieStore.set(AUTH_COOKIE_NAME, "", sessionCookieOptions(0));
 
     return successResponse({ message: "Logged out successfully" });
-  } catch {
-    return errorResponse(ApiError.internal());
+  } catch (error) {
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

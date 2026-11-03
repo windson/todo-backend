@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse(formattedTags);
   } catch (error) {
-    return errorResponse(error instanceof ApiError ? error : ApiError.internal());
+    return errorResponse(error instanceof ApiError ? error : ApiError.internal(undefined, error));
   }
 }
 
@@ -53,6 +53,6 @@ export async function POST(request: NextRequest) {
     return createdResponse(tag);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }

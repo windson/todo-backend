@@ -48,7 +48,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return successResponse(share);
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
 
@@ -88,6 +88,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return successResponse({ message: "Share removed successfully" });
   } catch (error) {
     if (error instanceof ApiError) return errorResponse(error);
-    return errorResponse(ApiError.internal());
+    return errorResponse(ApiError.internal(undefined, error));
   }
 }
