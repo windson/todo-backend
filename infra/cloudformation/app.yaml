@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  todo-backend application tier hosted as an AWS Lambda Web Function (new
+  capability; AWS::Lambda::WebFunction / WebFunctionRevision / WebFunctionEndpoint).
+  The Web Function server process is `next start` listening on PORT. A Lambda
+  network connector (AWS::Lambda::NetworkConnector) provisions ENIs in the
+  private subnets so the function can reach Aurora on 5432. All secret values are
+  injected via resolve:secretsmanager dynamic references; no secret is inline.
+
+Parameters:
+  NetworkStackName:
+    Type: String
+    Description: Name of the network stack (exports subnets + Web Function connector SG).
+  DatabaseStackName:
+    Type: String
+    Description: Name of the database stack (exports Aurora endpoint, DB name, secret ARNs, KMS key).
+  PipelineStackName:
+    Type: String
+    Description: Name of the pipeline stack (exports the artifact bucket name).
+  ArtifactObjectKey:
+    Type: String
+    Description: S3 key of the built application .zip in the artifact bucket (set by CodeBuild per build).
+  Runtime:
+    Type: String
+    Default: nodejs24.x
+    Description: Lambda Web Function Node.js runtime.
+  FunctionName:
+    Type: String
+    Default: todo-backend-api
+    AllowedPattern: "^[a-zA-Z0-9][a-zA-Z0-9-_]{0,62}[a-zA-Z0-9]$"
+    Description: Name of the Lambda Web Function.
+  Port:
+    Type: String
+    Default: "8080"
+    Description: Port the `next start` HTTP server listens on inside the Web Function.
+  TimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 3
+    MaxValue: 900
+    Description: Per-request timeout for the Web Function.
+
+Resources:
+  # IAM role Lambda assumes to manage the network-connector ENIs in the VPC.
+  ConnectorOperatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: manage-enis
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                Resource: "*"
+
+  # Managed network path from the Web Function to Aurora in the private subnets.
+  NetworkConnector:
+    Type: AWS::Lambda::NetworkConnector
+    Properties:
+      Name: !Sub "${FunctionName}-connector"
+      OperatorRole: !GetAtt ConnectorOperatorRole.Arn
+      Configuration:
+        VpcEgressConfiguration:
+          NetworkProtocol: IPv4
+          AssociatedComputeResourceTypes:
+            - WebFunction
+          SubnetIds: !Split
+            - ","
+            - Fn::ImportValue: !Sub "${NetworkStackName}-PrivateSubnetIds"
+          SecurityGroupIds:
+            - Fn::ImportValue: !Sub "${NetworkStackName}-WebFunctionConnectorSgId"
+
+  # Least-privilege execution role: CloudWatch Logs + read of the three specific
+  # secrets + decrypt via the data KMS key. No wildcard resource grants.
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+        - PolicyName: read-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - Fn::ImportValue: !Sub "${DatabaseStackName}-MasterUserSecretArn"
+                  - Fn::ImportValue: !Sub "${DatabaseStackName}-JwtSecretArn"
+                  - Fn::ImportValue: !Sub "${DatabaseStackName}-ReminderDispatchSecretArn"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource:
+                  - Fn::ImportValue: !Sub "${DatabaseStackName}-DataKmsKeyArn"
+
+  WebFunction:
+    Type: AWS::Lambda::WebFunction
+    Properties:
+      FunctionName: !Ref FunctionName
+      Tags:
+        - Key: app
+          Value: todo-backend
+
+  WebFunctionRevision:
+    Type: AWS::Lambda::WebFunctionRevision
+    Properties:
+      FunctionName: !Ref WebFunction
+      Description: !Sub "Revision for ${ArtifactObjectKey}"
+      BuildConfig:
+        CodeConfig:
+          S3Object:
+            Bucket:
+              Fn::ImportValue: !Sub "${PipelineStackName}-ArtifactBucketName"
+            Key: !Ref ArtifactObjectKey
+        RuntimeConfig:
+          Runtime: !Ref Runtime
+      ServiceConfig:
+        ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+        TimeoutSeconds: !Ref TimeoutSeconds
+        EgressNetworkConnectorArn: !GetAtt NetworkConnector.LatestVersionArn
+        # Secrets are resolved from Secrets Manager at the point of use; no
+        # secret literal is stored in the template or the revision definition.
+        # DATABASE_URL is assembled from the RDS-managed master secret
+        # (username/password JSON keys) + the exported cluster endpoint/port/db.
+        EnvironmentVariables:
+          NODE_ENV: production
+          PORT: !Ref Port
+          DATABASE_URL: !Sub
+            - "postgresql://{{resolve:secretsmanager:${MasterSecretArn}:SecretString:username}}:{{resolve:secretsmanager:${MasterSecretArn}:SecretString:password}}@${DbHost}:${DbPort}/${DbName}?sslmode=require"
+            - MasterSecretArn:
+                Fn::ImportValue: !Sub "${DatabaseStackName}-MasterUserSecretArn"
+              DbHost:
+                Fn::ImportValue: !Sub "${DatabaseStackName}-ClusterEndpoint"
+              DbPort:
+                Fn::ImportValue: !Sub "${DatabaseStackName}-ClusterPort"
+              DbName:
+                Fn::ImportValue: !Sub "${DatabaseStackName}-DatabaseName"
+          JWT_SECRET: !Sub
+            - "{{resolve:secretsmanager:${JwtSecretArn}:SecretString}}"
+            - JwtSecretArn:
+                Fn::ImportValue: !Sub "${DatabaseStackName}-JwtSecretArn"
+          REMINDER_DISPATCH_SECRET: !Sub
+            - "{{resolve:secretsmanager:${DispatchSecretArn}:SecretString}}"
+            - DispatchSecretArn:
+                Fn::ImportValue: !Sub "${DatabaseStackName}-ReminderDispatchSecretArn"
+
+  WebFunctionEndpoint:
+    Type: AWS::Lambda::WebFunctionEndpoint
+    Properties:
+      FunctionName: !Ref WebFunction
+      EndpointName: !Sub "${FunctionName}-endpoint"
+      EndpointType: HomeRegion
+      # The app performs its own JWT auth, so the endpoint does not add IAM auth.
+      AuthType: ApplicationManaged
+      RevisionWeights:
+        - RevisionId: !GetAtt WebFunctionRevision.RevisionId
+          Weight: 100
+
+Outputs:
+  EndpointDomainName:
+    Description: HTTPS domain name of the Web Function endpoint (the API base host).
+    Value: !GetAtt WebFunctionEndpoint.DomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-EndpointDomainName"
+  RevisionId:
+    Description: The current Web Function revision id (see infra/CUTOVER.md for the RevisionWeights cutover).
+    Value: !GetAtt WebFunctionRevision.RevisionId
+    Export:
+      Name: !Sub "${AWS::StackName}-RevisionId"
