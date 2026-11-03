@@ -127,6 +127,9 @@ jobs:
           set -e
 
           echo "exit_code=$cli_status" >> "$GITHUB_OUTPUT"
+          credits=$(python3 .github/scripts/extract-kiro-credits.py "$RUNNER_TEMP/kiro-review.jsonl")
+          echo "credits=$credits" >> "$GITHUB_OUTPUT"
+          echo "Kiro credits consumed: $credits"
           python3 .github/scripts/extract-kiro-review.py \
             "$RUNNER_TEMP/kiro-review.jsonl" \
             .kiro/review-input/pr.diff \
@@ -192,6 +195,25 @@ jobs:
                 comment_id: comment.id,
               });
             }
+
+      - name: Show Kiro credit usage
+        if: always()
+        env:
+          KIRO_CREDITS: ${{ steps.kiro.outputs.credits }}
+          KIRO_OUTCOME: ${{ steps.kiro.outcome }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          {
+            echo "### Kiro PR review usage"
+            echo
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            printf '| Credits | `%s` |\n' "${KIRO_CREDITS:-unknown}"
+            printf '| Outcome | `%s` |\n' "${KIRO_OUTCOME:-not-run}"
+            printf '| Pull request | `%s` |\n' "${PR_NUMBER:-unknown}"
+            printf '| Head commit | `%s` |\n' "${HEAD_SHA:-unknown}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Require successful Kiro review
         if: steps.kiro.outcome != 'success'
