@@ -2,7 +2,9 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   todo-backend application tier hosted as an AWS Lambda Web Function (new
   capability; AWS::Lambda::WebFunction / WebFunctionRevision / WebFunctionEndpoint).
-  The Web Function server process is `next start` listening on PORT. A Lambda
+  The Web Function Node.js runtime loads index.js at the package root (NOT
+  `next start`) and provides the listen address via AWS_LAMBDA_HTTP_ENDPOINT
+  (host:port); index.js boots the Next.js standalone server on it. A Lambda
   network connector (AWS::Lambda::NetworkConnector) provisions ENIs in the
   private subnets so the function can reach Aurora on 5432. All secret values are
   injected via resolve:secretsmanager dynamic references; no secret is inline.
@@ -32,7 +34,10 @@ Parameters:
   Port:
     Type: String
     Default: "8080"
-    Description: Port the `next start` HTTP server listens on inside the Web Function.
+    Description: >-
+      Secondary PORT fallback for the HTTP server. The Web Function runtime sets
+      AWS_LAMBDA_HTTP_ENDPOINT (host:port), which index.js uses as the source of
+      truth; this PORT env var is only a fallback for parity/local parity.
   TimeoutSeconds:
     Type: Number
     Default: 30
@@ -153,6 +158,8 @@ Resources:
         # (username/password JSON keys) + the exported cluster endpoint/port/db.
         EnvironmentVariables:
           NODE_ENV: production
+          # The runtime sets AWS_LAMBDA_HTTP_ENDPOINT (host:port); index.js uses
+          # it as the listen address. PORT is kept only as a secondary fallback.
           PORT: !Ref Port
           DATABASE_URL: !Sub
             - "postgresql://{{resolve:secretsmanager:${MasterSecretArn}:SecretString:username}}:{{resolve:secretsmanager:${MasterSecretArn}:SecretString:password}}@${DbHost}:${DbPort}/${DbName}?sslmode=require"

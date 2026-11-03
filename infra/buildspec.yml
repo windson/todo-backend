@@ -67,12 +67,17 @@ phases:
       # `.next/standalone` (note the trailing `/.`), so `server.js` and the
       # copied `package.json` sit at the archive ROOT.
       #
-      # START COMMAND: the Web Function runs the package.json `start` script.
-      # Next copies the project package.json into `.next/standalone/package.json`
-      # verbatim, and that script is `node server.js` (NOT `next start`, which is
-      # incompatible with standalone packaging). `server.js` is at the archive
-      # root and binds an HTTP server on process.env.PORT (app.yaml sets 8080)
-      # and HOSTNAME 0.0.0.0, so the runtime boots correctly from the package.
+      # ENTRYPOINT: the Web Function Node.js runtime loads `index.js` at the
+      # archive ROOT (NOT a package.json `start` script, NOT `next start`). See
+      # https://docs.aws.amazon.com/lambda/latest/dg/web-functions-runtimes.html
+      # and infra/README.md ("The Web Function server process"). We ship a small
+      # committed entry, infra/webfunction/index.js, and copy it to
+      # `.next/standalone/index.js` (next to the standalone `server.js`) in
+      # post_build below. That entry reads AWS_LAMBDA_HTTP_ENDPOINT ("host:port",
+      # which the runtime sets - NOT PORT), maps it onto the HOSTNAME/PORT env
+      # vars that Next's standalone server.js reads at require time, then
+      # `require('./server.js')`. The package.json `start` script (`node
+      # server.js`) is kept for LOCAL use only and is irrelevant to the runtime.
       #
       # PRISMA: the app connects with @prisma/client + @prisma/adapter-pg over a
       # driver adapter (lib/prisma.ts). next.config.ts `outputFileTracingIncludes`
@@ -82,6 +87,9 @@ phases:
       # fail the build if they are missing, rather than shipping a broken zip.
       - cp -r .next/static .next/standalone/.next/static
       - '[ -d public ] && cp -r public .next/standalone/public || true'
+      # Place the Web Function entry at the archive root (next to server.js) so
+      # the runtime can load `index.js`. See the ENTRYPOINT note above.
+      - cp infra/webfunction/index.js .next/standalone/index.js
       # Defense in depth: Next copies any local .env* files into the standalone
       # output. The pipeline checkout has none (they are gitignored), but strip
       # them unconditionally so no local/dotenv secret can ever ride along in
@@ -89,6 +97,9 @@ phases:
       # EnvironmentVariables in infra/cloudformation/app.yaml, not a bundled .env.
       - rm -f .next/standalone/.env .next/standalone/.env.* 2>/dev/null || true
       - 'test -f .next/standalone/server.js || { echo "ERROR: .next/standalone/server.js missing; is output standalone set in next.config.ts?" >&2; exit 1; }'
+      # The Web Function runtime loads index.js at the package root; fail the
+      # build if it did not make it into the standalone package.
+      - 'test -f .next/standalone/index.js || { echo "ERROR: .next/standalone/index.js missing; the Web Function entry (infra/webfunction/index.js) was not copied into the package." >&2; exit 1; }'
       - 'test -d .next/standalone/node_modules/.prisma/client || { echo "ERROR: generated Prisma client missing from standalone bundle." >&2; exit 1; }'
       - ARTIFACT_KEY="todo-backend/${CODEBUILD_RESOLVED_SOURCE_VERSION}.zip"
       # Zip the CONTENTS of .next/standalone at the archive root (server.js and
