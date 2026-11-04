@@ -87,6 +87,30 @@ describe("prisma seed", () => {
     expect(typeof runSeed).toBe("function");
   });
 
+  it("does not construct a PrismaClient or call $disconnect on import", async () => {
+    // Regression guard for the `require.main === module` entry-point check:
+    // importing the module (as this test file and every other test file
+    // does) must never run the main block, which would construct a real
+    // PrismaClient (no test database is configured) and call $disconnect. A
+    // regressed guard (e.g. one that always evaluates truthy) would make this
+    // constructor spy observe a call during the dynamic import below.
+    const disconnectSpy = vi.fn().mockResolvedValue(undefined);
+    const constructSpy = vi.fn();
+    vi.doMock("@prisma/client", () => ({
+      Priority: { LOW: "LOW", MEDIUM: "MEDIUM", HIGH: "HIGH" },
+      PrismaClient: vi.fn().mockImplementation((...args: unknown[]) => {
+        constructSpy(...args);
+        return { $disconnect: disconnectSpy };
+      }),
+    }));
+    vi.resetModules();
+    await import("../../prisma/seed");
+    expect(constructSpy).not.toHaveBeenCalled();
+    expect(disconnectSpy).not.toHaveBeenCalled();
+    vi.doUnmock("@prisma/client");
+    vi.resetModules();
+  });
+
   it("creates no duplicates when the idempotent seed runs twice", async () => {
     const store = wireStore();
     await runSeed(client(), true);
@@ -133,6 +157,24 @@ describe("prisma seed", () => {
   it("requires env passwords of at least 12 characters in idempotent mode", async () => {
     wireStore();
     process.env.SEED_PASSWORD_DEMO = "short";
+    await expect(runSeed(client(), true)).rejects.toThrow(/SEED_PASSWORD_DEMO/);
+  });
+
+  it("requires SEED_PASSWORD_COLLABORATOR to be at least 12 characters", async () => {
+    wireStore();
+    process.env.SEED_PASSWORD_COLLABORATOR = "short";
+    await expect(runSeed(client(), true)).rejects.toThrow(/SEED_PASSWORD_COLLABORATOR/);
+  });
+
+  it("requires SEED_PASSWORD_COLLABORATOR to be set at all", async () => {
+    wireStore();
+    delete process.env.SEED_PASSWORD_COLLABORATOR;
+    await expect(runSeed(client(), true)).rejects.toThrow(/SEED_PASSWORD_COLLABORATOR/);
+  });
+
+  it("requires SEED_PASSWORD_DEMO to be set at all", async () => {
+    wireStore();
+    delete process.env.SEED_PASSWORD_DEMO;
     await expect(runSeed(client(), true)).rejects.toThrow(/SEED_PASSWORD_DEMO/);
   });
 

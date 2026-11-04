@@ -107,13 +107,28 @@ See [`CUTOVER.md`](./CUTOVER.md) for the full cutover (and optional canary) step
 
 The CodeBuild project's declared source is GitHub, but a one-off build can be
 started from a source zip uploaded to S3 (`--source-type-override S3
---source-location-override <bucket>/<key>`). Two things matter for that path:
+--source-location-override <ArtifactBucketName>/src/<name>.zip`). Three things matter for that path:
 
-- **Pass `sourceVersion` = the S3 object's `VersionId`.** For an S3 source,
-  `StartBuild` must be given `--source-version <VersionId>` (get it from the
-  `aws s3api put-object` / `head-object` output of the source zip; the source
-  bucket must be versioned). If it is omitted, CodeBuild does not reliably pick
-  up the newly uploaded object and may build a stale one.
+- **The source zip must be uploaded to the pipeline's own artifact bucket.**
+  The CodeBuild service role (`infra/cloudformation/pipeline.yaml`) is granted
+  `s3:GetObject`/`s3:GetObjectVersion`/`s3:PutObject` only on the pipeline
+  stack's `ArtifactBucketName` output, not on any other bucket. A source zip
+  uploaded elsewhere fails the source-download step with an access-denied
+  error for `s3:GetObjectVersion`. Upload under a prefix such as `src/`, e.g.:
+
+  ```bash
+  aws s3 cp app-src.zip "s3://<ArtifactBucketName>/src/app-src.zip"
+  aws s3api head-object --bucket <ArtifactBucketName> --key src/app-src.zip \
+    --query VersionId --output text
+  ```
+
+- **Pass `sourceVersion` = the uploaded object's `VersionId`.** For an S3
+  source, `StartBuild` must be given `--source-type-override S3
+  --source-location-override <ArtifactBucketName>/src/<name>.zip
+  --source-version <VersionId>` (the `VersionId` from the `head-object` call
+  above; the artifact bucket already has versioning enabled). If
+  `--source-version` is omitted, CodeBuild does not reliably pick up the newly
+  uploaded object and may build a stale one.
 - **`CODEBUILD_RESOLVED_SOURCE_VERSION` is empty for S3 sources** (it is only the
   commit SHA for GitHub sources). The buildspec therefore derives the artifact
   key as follows, and fails the build (exit 1, message on stderr) if the result

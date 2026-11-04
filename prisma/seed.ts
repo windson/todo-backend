@@ -478,6 +478,14 @@ export async function runSeed(
 
 // Run only when executed as a script (ts-node / `prisma db seed`), never when
 // imported (e.g. by unit tests).
+//
+// CommonJS ONLY: `require` and `module` only exist under CommonJS. The `seed`
+// script in package.json runs this file via `ts-node --compiler-options
+// {"module":"CommonJS"}` specifically so this guard works. If this file is
+// ever executed under ESM (e.g. via `tsx` or a bare `node --loader` without
+// that override), `typeof require` is "undefined", the condition below is
+// always false, and the seed silently never runs. Keep the CommonJS compiler
+// override on the `seed` script.
 if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
   const prisma = new PrismaClient({ adapter: new PrismaPg(poolConfig()) });
   runSeed(prisma)
