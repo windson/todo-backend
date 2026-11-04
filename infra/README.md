@@ -107,7 +107,7 @@ See [`CUTOVER.md`](./CUTOVER.md) for the full cutover (and optional canary) step
 
 - **network.yaml**: `VpcCidr` (default `10.42.0.0/16`), `PrivateSubnet1Cidr`, `PrivateSubnet2Cidr`.
 - **database.yaml**: `NetworkStackName`, `DatabaseName` (`tododb`), `MasterUsername` (`todoadmin`), `EngineVersion` (default `16.6`, PostgreSQL 16 line, matching `docker-compose` `postgres:16` — **confirm it is offered in your region first**, see "Aurora engine version" below), `MinCapacity` (`0.5`), `MaxCapacity` (`4`).
-- **app.yaml**: `NetworkStackName`, `DatabaseStackName`, `PipelineStackName`, `ArtifactObjectKey`, `Runtime` (`nodejs24.x`), `FunctionName` (`todo-backend-api`), `Port` (`8080`), `TimeoutSeconds` (`30`).
+- **app.yaml**: `NetworkStackName`, `DatabaseStackName`, `PipelineStackName`, `ArtifactObjectKey`, `Runtime` (`nodejs24.x`), `FunctionName` (`todo-backend-api`), `Port` (`8080`), `TimeoutSeconds` (`30`), `CorsAllowedOrigins` (default empty; comma separated SPA origins, see "Cross-origin SPA" below).
 - **pipeline.yaml**: `DatabaseStackName`, `SourceRepositoryUrl`, `SourceBranch` (`feat/aws-iac-cicd`).
 
 ## The Web Function server process
@@ -187,6 +187,32 @@ falls back to a single `DATABASE_URL` for local docker-compose development.
 The password is still **never stored in plaintext** in the template: both
 `DB_USER` and `DB_PASSWORD` are injected at deploy time from the RDS-managed
 master secret via `resolve:secretsmanager`.
+
+### Cross-origin SPA (CORS + session cookie)
+
+When the frontend is served from a different origin than the API (for example
+two separate Lambda Web Function endpoints), pass that origin in the app stack's
+`CorsAllowedOrigins` parameter (comma separated, no trailing slash). It is
+exposed to the app as `CORS_ALLOWED_ORIGINS`, which:
+
+- adds the origin to the credentialed CORS allow-list in `proxy.ts` (with
+  `Vary: Origin`), and
+- switches the httpOnly session cookie to `SameSite=None; Secure` in production
+  so the browser sends it on cross-site XHR/fetch requests.
+
+Leave it empty for same-origin deployments; the cookie then stays
+`SameSite=Lax`.
+
+### Seeding the live database without leaking passwords
+
+`prisma/seed.ts` supports `SEED_MODE=idempotent` with the user passwords taken
+from `SEED_PASSWORD_*` environment variables. When running it as a one-off
+CodeBuild build inside the VPC, **never** pass those passwords as `PLAINTEXT`
+environment overrides (they are stored in the build record). Store them in
+Secrets Manager (or SSM Parameter Store SecureString) and reference them with
+`environmentVariablesOverride` entries of type `SECRETS_MANAGER` (or
+`PARAMETER_STORE`); CodeBuild resolves the value at runtime and masks it in the
+logs. The CodeBuild role needs `secretsmanager:GetSecretValue` on that secret.
 
 ## CodeBuild + CodeDeploy flow
 
