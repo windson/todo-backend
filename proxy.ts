@@ -4,22 +4,15 @@ import {
   enforceRateLimit,
   isRateLimitEnabled,
 } from "@/lib/rate-limit";
+import { buildAllowedOrigins, csrfViolation } from "@/lib/cors";
 import { logRequest, isRequestLogEnabled } from "@/lib/request-log";
 
-// Extra browser origins (comma separated) allowed to call the API with
-// credentials, e.g. a separately hosted SPA. Set via CORS_ALLOWED_ORIGINS.
-function parseOrigins(raw: string | undefined): string[] {
-  return (raw ?? "")
-    .split(",")
-    .map((o) => o.trim().replace(/\/+$/, ""))
-    .filter(Boolean);
-}
-
-const ALLOWED_ORIGINS = [
-  "http://localhost:5173",
-  "http://localhost:3000",
-  ...parseOrigins(process.env.CORS_ALLOWED_ORIGINS),
-];
+// Origins (CORS_ALLOWED_ORIGINS, comma separated) allowed to call the API with
+// credentials. Localhost origins are only included outside production.
+const ALLOWED_ORIGINS = buildAllowedOrigins(
+  process.env.CORS_ALLOWED_ORIGINS,
+  process.env.NODE_ENV,
+);
 
 // Paths exempt from rate limiting (or that must never be locked out): the auth
 // bootstrap endpoints a freshly-loaded client hammers, and the OpenAPI doc.
@@ -83,6 +76,16 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const startedAt = Date.now();
+
+  // CSRF defence for state-changing requests (applies to login/signup too).
+  const csrfError = csrfViolation(request, ALLOWED_ORIGINS);
+  if (csrfError) {
+    const response = NextResponse.json(
+      { success: false, error: { message: csrfError } },
+      { status: csrfError.startsWith("Unsupported") ? 415 : 403 }
+    );
+    return applyCors(response, origin, isAllowedOrigin);
+  }
 
   // Log a completed request handled (or rejected) by middleware itself. For
   // requests middleware forwards to a route handler, the handler's status is

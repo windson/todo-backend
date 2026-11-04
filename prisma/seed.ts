@@ -60,7 +60,9 @@ async function main() {
     const passwordHash = await bcrypt.hash(passwordFor(envName), 10);
     return prisma.user.upsert({
       where: { email },
-      update: { passwordHash, name },
+      // Never overwrite an existing user's password hash: re-running the seed
+      // must not clobber passwords changed by real users.
+      update: {},
       create: { email, passwordHash, name },
     });
   };
@@ -255,7 +257,6 @@ async function main() {
   const existingParent = await prisma.todo.findFirst({
     where: { userId: user.id, title: "Launch marketing website", parentId: null },
   });
-  const parentCreated = existingParent === null;
   const parentTodo = existingParent ?? (await prisma.todo.create({
     data: {
       title: "Launch marketing website",
@@ -289,11 +290,21 @@ async function main() {
 
   console.log(`Created 1 parent todo with ${subtasks.length} subtasks`);
 
+  // Everything attached to the parent todo is created in ONE transaction, and
+  // is considered done only once its final activity entry ("todo.assigned")
+  // exists. A run that fails midway rolls back, so the next run retries it
+  // instead of leaving the parent permanently without its child data.
+  const alreadySeeded =
+    (await prisma.activityLog.findFirst({
+      where: { todoId: parentTodo.id, action: "todo.assigned" },
+      select: { id: true },
+    })) !== null;
+  if (!alreadySeeded) {
+    await prisma.$transaction(async (tx) => {
   // Everything attached to the parent todo is created once, together with it.
-  if (parentCreated) {
   // Add a couple of comments, an attachment reference, and some activity-log
   // entries to the parent todo to exercise the rich-content feature.
-  await prisma.comment.createMany({
+  await tx.comment.createMany({
     data: [
       {
         todoId: parentTodo.id,
@@ -308,7 +319,7 @@ async function main() {
     ],
   });
 
-  await prisma.attachment.create({
+  await tx.attachment.create({
     data: {
       todoId: parentTodo.id,
       filename: "launch-brief.pdf",
@@ -318,7 +329,7 @@ async function main() {
     },
   });
 
-  await prisma.activityLog.createMany({
+  await tx.activityLog.createMany({
     data: [
       {
         todoId: parentTodo.id,
@@ -344,7 +355,7 @@ async function main() {
 
   // Create a recurring todo to exercise the recurrence feature. Completing it
   // via the API will spawn the next weekly occurrence.
-  if (!(await todoExists("Weekly team sync"))) await prisma.todo.create({
+  if (!(await todoExists("Weekly team sync"))) await tx.todo.create({
     data: {
       title: "Weekly team sync",
       description: "Recurring weekly standup with the team",
@@ -364,7 +375,7 @@ async function main() {
   // Add an in-app reminder on the parent todo and an unread notification so the
   // reminders/notifications feature has seed data to surface.
   const reminderAt = new Date(now.getTime() + 60 * 60 * 1000); // one hour out
-  await prisma.reminder.create({
+  await tx.reminder.create({
     data: {
       todoId: parentTodo.id,
       userId: user.id,
@@ -373,7 +384,7 @@ async function main() {
     },
   });
 
-  await prisma.notification.create({
+  await tx.notification.create({
     data: {
       userId: user.id,
       type: "reminder.due",
@@ -391,7 +402,7 @@ async function main() {
   // Add a couple of saved views (named smart filters) so the saved-views /
   // board feature has seed data. `filters` mirrors the GET /api/todos query
   // params the frontend round-trips through its TodoFilters.
-  await prisma.savedView.create({
+  await tx.savedView.create({
     data: {
       userId: user.id,
       name: "High priority",
@@ -399,7 +410,7 @@ async function main() {
     },
   });
 
-  await prisma.savedView.create({
+  await tx.savedView.create({
     data: {
       userId: user.id,
       name: "Due today",
@@ -411,7 +422,7 @@ async function main() {
 
   // Sharing & collaboration (FEAT-008): share the parent "Launch marketing
   // website" todo with the collaborator as an EDITOR and assign it to them.
-  await prisma.todoShare.create({
+  await tx.todoShare.create({
     data: {
       todoId: parentTodo.id,
       userId: collaborator.id,
@@ -419,12 +430,12 @@ async function main() {
     },
   });
 
-  await prisma.todo.update({
+  await tx.todo.update({
     where: { id: parentTodo.id },
     data: { assigneeId: collaborator.id },
   });
 
-  await prisma.activityLog.createMany({
+  await tx.activityLog.createMany({
     data: [
       {
         todoId: parentTodo.id,
@@ -442,7 +453,7 @@ async function main() {
   });
 
   // Notify the collaborator that a todo was shared with and assigned to them.
-  await prisma.notification.createMany({
+  await tx.notification.createMany({
     data: [
       {
         userId: collaborator.id,
@@ -460,6 +471,7 @@ async function main() {
   });
 
   console.log("Shared and assigned the launch todo to the collaborator");
+    });
   }
   console.log("Seeding completed!");
 }

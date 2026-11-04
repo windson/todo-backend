@@ -203,7 +203,28 @@ exposed to the app as `CORS_ALLOWED_ORIGINS`, which:
 Leave it empty for same-origin deployments; the cookie then stays
 `SameSite=Lax`.
 
+**SameSite=None tradeoff.** `SameSite=None` removes the browser's built-in CSRF
+defence, and the switch is global (every client gets the cross-site cookie once
+the variable is non-empty). To compensate, `proxy.ts` (via `lib/cors.ts`)
+applies a CSRF check to every POST/PUT/PATCH/DELETE, including login/signup:
+
+- a request whose `Origin` header is not in the allow-list gets `403`
+  (localhost dev origins are not trusted when `NODE_ENV=production`);
+- a request declaring a content type must be `application/json` or `text/csv`, or carry an
+  `X-Requested-With` header, otherwise `415` (HTML forms cannot send these, so
+  `text/plain` form-post tricks are blocked).
+
+Use `https://` origins only. A longer-term alternative is bearer-token auth
+(the API already accepts `Authorization: Bearer`), which avoids cross-site
+cookies entirely.
+
 ### Seeding the live database without leaking passwords
+
+Idempotent seeding never overwrites an existing user's password hash, and the
+data attached to the launch todo is created in a single transaction (retried on
+the next run if it fails). The seed connects with `rejectUnauthorized: false`
+(same as `lib/prisma.ts`): acceptable inside the VPC, but consider the RDS CA
+bundle for stricter verification.
 
 `prisma/seed.ts` supports `SEED_MODE=idempotent` with the user passwords taken
 from `SEED_PASSWORD_*` environment variables. When running it as a one-off
