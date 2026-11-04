@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Import the Prisma mock helper first (registers the module mock + reset hook).
 import { prismaMock } from "../helpers/prisma-mock";
-import { runSeed } from "../../prisma/seed";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { runSeed, isMainModule } from "../../prisma/seed";
 import type { PrismaClient } from "@prisma/client";
 
 const DEMO_PW = "demo-seed-secret-1234";
@@ -110,6 +112,42 @@ describe("prisma seed", () => {
     vi.doUnmock("@prisma/client");
     vi.resetModules();
   });
+
+  it("isMainModule is true only when require.main is the module itself", () => {
+    const mod = {};
+    expect(isMainModule({ main: mod }, mod)).toBe(true);
+    expect(isMainModule({ main: {} }, mod)).toBe(false);
+    expect(isMainModule({ main: undefined }, mod)).toBe(false);
+    // ESM: no require/module bindings, so the seed must not run.
+    expect(isMainModule(undefined, undefined)).toBe(false);
+    expect(isMainModule(undefined, mod)).toBe(false);
+    expect(isMainModule({ main: mod }, undefined)).toBe(false);
+  });
+
+  it("runs the seed entry under CommonJS (ts-node, as the seed script does)", () => {
+    // Needs no database: idempotent mode without passwords fails fast with the
+    // missing-password error, which proves the CommonJS guard fired and
+    // runSeed executed. If the guard never fired, the process would exit 0
+    // silently and print nothing.
+    const root = path.resolve(__dirname, "../..");
+    const env = { ...process.env, SEED_MODE: "idempotent" } as NodeJS.ProcessEnv;
+    delete env.SEED_PASSWORD_DEMO;
+    delete env.SEED_PASSWORD_COLLABORATOR;
+    env.DATABASE_URL = "postgresql://invalid:invalid@127.0.0.1:1/none";
+    const res = spawnSync(
+      process.execPath,
+      [
+        require.resolve("ts-node/dist/bin.js"),
+        "--compiler-options",
+        '{"module":"CommonJS"}',
+        "prisma/seed.ts",
+      ],
+      { cwd: root, env, encoding: "utf8", timeout: 90_000 },
+    );
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain("Seeding database (idempotent mode)");
+    expect(res.stderr).toContain("SEED_PASSWORD_DEMO");
+  }, 120_000);
 
   it("creates no duplicates when the idempotent seed runs twice", async () => {
     const store = wireStore();

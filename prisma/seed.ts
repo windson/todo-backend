@@ -28,6 +28,18 @@ function poolConfig(): PoolConfig {
   return { connectionString: process.env.DATABASE_URL! };
 }
 
+/**
+ * True only when this file is the CommonJS entry point. `req`/`mod` are the
+ * CommonJS `require`/`module` bindings, or undefined under ESM (where the
+ * seed never runs; see the note on the entry guard below).
+ */
+export function isMainModule(
+  req: { main?: unknown } | undefined,
+  mod: unknown,
+): boolean {
+  return req !== undefined && mod !== undefined && req.main === mod;
+}
+
 export function passwordFor(envName: string, idempotent: boolean): string {
   if (!idempotent) return "password123";
   const value = process.env[envName];
@@ -486,7 +498,7 @@ export async function runSeed(
 // that override), `typeof require` is "undefined", the condition below is
 // always false, and the seed silently never runs. Keep the CommonJS compiler
 // override on the `seed` script.
-if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
+if (isMainModule(typeof require !== "undefined" ? require : undefined, typeof module !== "undefined" ? module : undefined)) {
   const prisma = new PrismaClient({ adapter: new PrismaPg(poolConfig()) });
   runSeed(prisma)
     .catch((e) => {
