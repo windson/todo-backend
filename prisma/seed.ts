@@ -10,7 +10,7 @@ import bcrypt from "bcryptjs";
 //    Everything is upserted / created only when missing, so re-running creates
 //    no duplicates. Passwords come from SEED_PASSWORD_DEMO and
 //    SEED_PASSWORD_COLLABORATOR (required, never logged).
-const idempotent = process.env.SEED_MODE === "idempotent";
+const isIdempotentMode = () => process.env.SEED_MODE === "idempotent";
 
 function poolConfig(): PoolConfig {
   if (process.env.DB_HOST) {
@@ -28,9 +28,7 @@ function poolConfig(): PoolConfig {
   return { connectionString: process.env.DATABASE_URL! };
 }
 
-const prisma = new PrismaClient({ adapter: new PrismaPg(poolConfig()) });
-
-function passwordFor(envName: string): string {
+export function passwordFor(envName: string, idempotent: boolean): string {
   if (!idempotent) return "password123";
   const value = process.env[envName];
   if (!value || value.length < 12) {
@@ -39,7 +37,10 @@ function passwordFor(envName: string): string {
   return value;
 }
 
-async function main() {
+export async function runSeed(
+  prisma: PrismaClient,
+  idempotent: boolean = isIdempotentMode(),
+) {
   console.log(`Seeding database (${idempotent ? "idempotent" : "reset"} mode)...`);
 
   if (!idempotent) {
@@ -57,7 +58,7 @@ async function main() {
   }
 
   const upsertUser = async (email: string, name: string, envName: string) => {
-    const passwordHash = await bcrypt.hash(passwordFor(envName), 10);
+    const passwordHash = await bcrypt.hash(passwordFor(envName, idempotent), 10);
     return prisma.user.upsert({
       where: { email },
       // Never overwrite an existing user's password hash: re-running the seed
@@ -475,11 +476,16 @@ async function main() {
   console.log("Seeding completed!");
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+// Run only when executed as a script (ts-node / `prisma db seed`), never when
+// imported (e.g. by unit tests).
+if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
+  const prisma = new PrismaClient({ adapter: new PrismaPg(poolConfig()) });
+  runSeed(prisma)
+    .catch((e) => {
+      console.error(e);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}
