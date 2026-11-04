@@ -151,10 +151,14 @@ export function hasValidDispatchSecret(request: NextRequest): boolean {
 
 /** Cookie options for the session cookie, shared by login/signup/logout. */
 export function sessionCookieOptions(maxAge: number) {
+  const secure = process.env.NODE_ENV === "production";
+  // When a separately hosted SPA is allowed via CORS_ALLOWED_ORIGINS the cookie
+  // is sent cross-site, which requires SameSite=None (and Secure).
+  const crossSite = secure && Boolean(process.env.CORS_ALLOWED_ORIGINS?.trim());
   return {
     httpOnly: true,
-    sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    sameSite: (crossSite ? "none" : "lax") as "none" | "lax",
+    secure,
     path: "/",
     maxAge,
   };

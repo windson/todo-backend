@@ -6,9 +6,19 @@ import {
 } from "@/lib/rate-limit";
 import { logRequest, isRequestLogEnabled } from "@/lib/request-log";
 
+// Extra browser origins (comma separated) allowed to call the API with
+// credentials, e.g. a separately hosted SPA. Set via CORS_ALLOWED_ORIGINS.
+function parseOrigins(raw: string | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((o) => o.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
 const ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://localhost:3000",
+  ...parseOrigins(process.env.CORS_ALLOWED_ORIGINS),
 ];
 
 // Paths exempt from rate limiting (or that must never be locked out): the auth
@@ -37,6 +47,7 @@ function applyCors(response: NextResponse, origin: string, isAllowedOrigin: bool
     response.headers.set("Access-Control-Allow-Origin", origin);
   }
   response.headers.set("Access-Control-Allow-Credentials", "true");
+  response.headers.append("Vary", "Origin");
   // Expose pagination (X-Total-Count + RFC 5988 Link) and rate-limit headers to
   // browser clients, which otherwise cannot read non-simple response headers.
   response.headers.set(
@@ -66,6 +77,7 @@ export async function proxy(request: NextRequest) {
     );
     response.headers.set("Access-Control-Allow-Credentials", "true");
     response.headers.set("Access-Control-Max-Age", "86400");
+    response.headers.append("Vary", "Origin");
     return response;
   }
 
