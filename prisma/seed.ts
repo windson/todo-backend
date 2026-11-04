@@ -1,79 +1,112 @@
 import { PrismaClient, Priority } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import type { PoolConfig } from "pg";
 import bcrypt from "bcryptjs";
 
-const adapter = new PrismaPg(process.env.DATABASE_URL!);
-const prisma = new PrismaClient({ adapter });
+// Seed modes:
+//  - default (local dev): wipes all tables and recreates data with the
+//    well-known dev password. Refused when NODE_ENV=production.
+//  - SEED_MODE=idempotent (deployed environments): NEVER deletes anything.
+//    Everything is upserted / created only when missing, so re-running creates
+//    no duplicates. Passwords come from SEED_PASSWORD_DEMO and
+//    SEED_PASSWORD_COLLABORATOR (required, never logged).
+const idempotent = process.env.SEED_MODE === "idempotent";
+
+function poolConfig(): PoolConfig {
+  if (process.env.DB_HOST) {
+    return {
+      host: process.env.DB_HOST,
+      port: Number(process.env.DB_PORT ?? 5432),
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      ...(process.env.DB_SSL === "require"
+        ? { ssl: { rejectUnauthorized: false } }
+        : {}),
+    };
+  }
+  return { connectionString: process.env.DATABASE_URL! };
+}
+
+const prisma = new PrismaClient({ adapter: new PrismaPg(poolConfig()) });
+
+function passwordFor(envName: string): string {
+  if (!idempotent) return "password123";
+  const value = process.env[envName];
+  if (!value || value.length < 12) {
+    throw new Error(`${envName} must be set (min 12 chars) when SEED_MODE=idempotent`);
+  }
+  return value;
+}
 
 async function main() {
-  console.log("Seeding database...");
+  console.log(`Seeding database (${idempotent ? "idempotent" : "reset"} mode)...`);
 
-  // Clean existing data. Most child tables cascade from Todo/User, but clear
-  // the join/share tables explicitly for a deterministic reset.
-  await prisma.todoShare.deleteMany();
-  await prisma.todoTag.deleteMany();
-  await prisma.todo.deleteMany();
-  await prisma.tag.deleteMany();
-  await prisma.category.deleteMany();
-  await prisma.user.deleteMany();
+  if (!idempotent) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Refusing to wipe data in production; use SEED_MODE=idempotent");
+    }
+    // Clean existing data. Most child tables cascade from Todo/User, but clear
+    // the join/share tables explicitly for a deterministic reset.
+    await prisma.todoShare.deleteMany();
+    await prisma.todoTag.deleteMany();
+    await prisma.todo.deleteMany();
+    await prisma.tag.deleteMany();
+    await prisma.category.deleteMany();
+    await prisma.user.deleteMany();
+  }
 
-  // Create a demo user that owns all seeded data
-  const passwordHash = await bcrypt.hash("password123", 10);
-  const user = await prisma.user.create({
-    data: {
-      email: "demo@example.com",
-      passwordHash,
-      name: "Demo User",
-    },
-  });
+  const upsertUser = async (email: string, name: string, envName: string) => {
+    const passwordHash = await bcrypt.hash(passwordFor(envName), 10);
+    return prisma.user.upsert({
+      where: { email },
+      // Never overwrite an existing user's password hash: re-running the seed
+      // must not clobber passwords changed by real users.
+      update: {},
+      create: { email, passwordHash, name },
+    });
+  };
 
-  console.log(`Created demo user ${user.email}`);
+  const user = await upsertUser("demo@example.com", "Demo User", "SEED_PASSWORD_DEMO");
+  console.log(`Ready demo user ${user.email}`);
 
-  // Create a second collaborator user so the sharing & assignee feature has
-  // seed data. Credentials: collaborator@example.com / password123.
-  const collaborator = await prisma.user.create({
-    data: {
-      email: "collaborator@example.com",
-      passwordHash,
-      name: "Casey Collaborator",
-    },
-  });
+  const collaborator = await upsertUser(
+    "collaborator@example.com",
+    "Casey Collaborator",
+    "SEED_PASSWORD_COLLABORATOR",
+  );
+  console.log(`Ready collaborator user ${collaborator.email}`);
 
-  console.log(`Created collaborator user ${collaborator.email}`);
+  const upsertCategory = (name: string, color: string) =>
+    prisma.category.upsert({
+      where: { userId_name: { userId: user.id, name } },
+      update: { color },
+      create: { name, color, userId: user.id },
+    });
+  const upsertTag = (name: string, color: string) =>
+    prisma.tag.upsert({
+      where: { userId_name: { userId: user.id, name } },
+      update: { color },
+      create: { name, color, userId: user.id },
+    });
 
   // Create categories
-  const categories = await Promise.all([
-    prisma.category.create({
-      data: { name: "Work", color: "#3B82F6", userId: user.id },
-    }),
-    prisma.category.create({
-      data: { name: "Personal", color: "#10B981", userId: user.id },
-    }),
-    prisma.category.create({
-      data: { name: "Shopping", color: "#F59E0B", userId: user.id },
-    }),
-    prisma.category.create({
-      data: { name: "Health", color: "#EF4444", userId: user.id },
-    }),
-  ]);
+  const categories = [
+    await upsertCategory("Work", "#3B82F6"),
+    await upsertCategory("Personal", "#10B981"),
+    await upsertCategory("Shopping", "#F59E0B"),
+    await upsertCategory("Health", "#EF4444"),
+  ];
 
   console.log(`Created ${categories.length} categories`);
 
   // Create tags
-  const tags = await Promise.all([
-    prisma.tag.create({
-      data: { name: "important", color: "#DC2626", userId: user.id },
-    }),
-    prisma.tag.create({
-      data: { name: "quick-win", color: "#16A34A", userId: user.id },
-    }),
-    prisma.tag.create({
-      data: { name: "blocked", color: "#9333EA", userId: user.id },
-    }),
-    prisma.tag.create({
-      data: { name: "review", color: "#2563EB", userId: user.id },
-    }),
-  ]);
+  const tags = [
+    await upsertTag("important", "#DC2626"),
+    await upsertTag("quick-win", "#16A34A"),
+    await upsertTag("blocked", "#9333EA"),
+    await upsertTag("review", "#2563EB"),
+  ];
 
   console.log(`Created ${tags.length} tags`);
 
@@ -195,8 +228,17 @@ async function main() {
     },
   ];
 
+  // Create a todo only if the user has no top-level/sibling todo with the same
+  // title yet, so re-running in idempotent mode adds no duplicates.
+  const todoExists = async (title: string, parentId: string | null = null) =>
+    (await prisma.todo.findFirst({
+      where: { userId: user.id, title, parentId },
+      select: { id: true },
+    })) !== null;
+
   for (const todoData of todosData) {
     const { tagIds, ...data } = todoData;
+    if (await todoExists(data.title)) continue;
     await prisma.todo.create({
       data: {
         ...data,
@@ -212,7 +254,10 @@ async function main() {
 
   // Create a parent todo with a small checklist of subtasks to exercise the
   // subtasks / progress feature.
-  const parentTodo = await prisma.todo.create({
+  const existingParent = await prisma.todo.findFirst({
+    where: { userId: user.id, title: "Launch marketing website", parentId: null },
+  });
+  const parentTodo = existingParent ?? (await prisma.todo.create({
     data: {
       title: "Launch marketing website",
       description: "Coordinate the full launch checklist",
@@ -222,7 +267,7 @@ async function main() {
       order: 13,
       userId: user.id,
     },
-  });
+  }));
 
   const subtasks = [
     { title: "Write landing page copy", completed: true, order: 1 },
@@ -232,6 +277,7 @@ async function main() {
   ];
 
   for (const subtask of subtasks) {
+    if (await todoExists(subtask.title, parentTodo.id)) continue;
     await prisma.todo.create({
       data: {
         ...subtask,
@@ -244,175 +290,188 @@ async function main() {
 
   console.log(`Created 1 parent todo with ${subtasks.length} subtasks`);
 
-  // Add a couple of comments, an attachment reference, and some activity-log
-  // entries to the parent todo to exercise the rich-content feature.
-  await prisma.comment.createMany({
-    data: [
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        body: "Kicking this off. See the **brief** in the attached doc.",
-      },
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        body: "Copy is drafted, moving on to analytics next.",
-      },
-    ],
-  });
+  // Everything attached to the parent todo is created in ONE transaction, and
+  // is considered done only once its final activity entry ("todo.assigned")
+  // exists. A run that fails midway rolls back, so the next run retries it
+  // instead of leaving the parent permanently without its child data.
+  const alreadySeeded =
+    (await prisma.activityLog.findFirst({
+      where: { todoId: parentTodo.id, action: "todo.assigned" },
+      select: { id: true },
+    })) !== null;
+  if (!alreadySeeded) {
+    await prisma.$transaction(async (tx) => {
+      // Add a couple of comments, an attachment reference, and some activity-log
+      // entries to the parent todo to exercise the rich-content feature.
+      await tx.comment.createMany({
+        data: [
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            body: "Kicking this off. See the **brief** in the attached doc.",
+          },
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            body: "Copy is drafted, moving on to analytics next.",
+          },
+        ],
+      });
 
-  await prisma.attachment.create({
-    data: {
-      todoId: parentTodo.id,
-      filename: "launch-brief.pdf",
-      url: "https://example.com/files/launch-brief.pdf",
-      mimeType: "application/pdf",
-      size: 248_000,
-    },
-  });
+      await tx.attachment.create({
+        data: {
+          todoId: parentTodo.id,
+          filename: "launch-brief.pdf",
+          url: "https://example.com/files/launch-brief.pdf",
+          mimeType: "application/pdf",
+          size: 248_000,
+        },
+      });
 
-  await prisma.activityLog.createMany({
-    data: [
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "todo.created",
-        metadata: { title: parentTodo.title },
-      },
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "comment.created",
-      },
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "attachment.added",
-        metadata: { filename: "launch-brief.pdf" },
-      },
-    ],
-  });
+      await tx.activityLog.createMany({
+        data: [
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "todo.created",
+            metadata: { title: parentTodo.title },
+          },
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "comment.created",
+          },
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "attachment.added",
+            metadata: { filename: "launch-brief.pdf" },
+          },
+        ],
+      });
 
-  console.log("Created comments, an attachment, and activity for the parent todo");
+      console.log("Created comments, an attachment, and activity for the parent todo");
 
-  // Create a recurring todo to exercise the recurrence feature. Completing it
-  // via the API will spawn the next weekly occurrence.
-  await prisma.todo.create({
-    data: {
-      title: "Weekly team sync",
-      description: "Recurring weekly standup with the team",
-      priority: Priority.MEDIUM,
-      startDate: now,
-      dueDate: tomorrow,
-      recurrenceRule: "WEEKLY",
-      recurrenceInterval: 1,
-      categoryId: categories[0].id,
-      order: 14,
-      userId: user.id,
-    },
-  });
+      // Create a recurring todo to exercise the recurrence feature. Completing it
+      // via the API will spawn the next weekly occurrence.
+      if (!(await todoExists("Weekly team sync"))) await tx.todo.create({
+        data: {
+          title: "Weekly team sync",
+          description: "Recurring weekly standup with the team",
+          priority: Priority.MEDIUM,
+          startDate: now,
+          dueDate: tomorrow,
+          recurrenceRule: "WEEKLY",
+          recurrenceInterval: 1,
+          categoryId: categories[0].id,
+          order: 14,
+          userId: user.id,
+        },
+      });
 
-  console.log("Created 1 recurring todo");
+      console.log("Created 1 recurring todo");
 
-  // Add an in-app reminder on the parent todo and an unread notification so the
-  // reminders/notifications feature has seed data to surface.
-  const reminderAt = new Date(now.getTime() + 60 * 60 * 1000); // one hour out
-  await prisma.reminder.create({
-    data: {
-      todoId: parentTodo.id,
-      userId: user.id,
-      remindAt: reminderAt,
-      channel: "INAPP",
-    },
-  });
+      // Add an in-app reminder on the parent todo and an unread notification so the
+      // reminders/notifications feature has seed data to surface.
+      const reminderAt = new Date(now.getTime() + 60 * 60 * 1000); // one hour out
+      await tx.reminder.create({
+        data: {
+          todoId: parentTodo.id,
+          userId: user.id,
+          remindAt: reminderAt,
+          channel: "INAPP",
+        },
+      });
 
-  await prisma.notification.create({
-    data: {
-      userId: user.id,
-      type: "reminder.due",
-      read: false,
-      payload: {
-        todoId: parentTodo.id,
-        todoTitle: parentTodo.title,
-        channel: "INAPP",
-      },
-    },
-  });
+      await tx.notification.create({
+        data: {
+          userId: user.id,
+          type: "reminder.due",
+          read: false,
+          payload: {
+            todoId: parentTodo.id,
+            todoTitle: parentTodo.title,
+            channel: "INAPP",
+          },
+        },
+      });
 
-  console.log("Created 1 reminder and 1 unread notification");
+      console.log("Created 1 reminder and 1 unread notification");
 
-  // Add a couple of saved views (named smart filters) so the saved-views /
-  // board feature has seed data. `filters` mirrors the GET /api/todos query
-  // params the frontend round-trips through its TodoFilters.
-  await prisma.savedView.create({
-    data: {
-      userId: user.id,
-      name: "High priority",
-      filters: { priority: "HIGH,URGENT", completed: "false", sortBy: "dueDate", sortOrder: "asc" },
-    },
-  });
+      // Add a couple of saved views (named smart filters) so the saved-views /
+      // board feature has seed data. `filters` mirrors the GET /api/todos query
+      // params the frontend round-trips through its TodoFilters.
+      await tx.savedView.create({
+        data: {
+          userId: user.id,
+          name: "High priority",
+          filters: { priority: "HIGH,URGENT", completed: "false", sortBy: "dueDate", sortOrder: "asc" },
+        },
+      });
 
-  await prisma.savedView.create({
-    data: {
-      userId: user.id,
-      name: "Due today",
-      filters: { dueFilter: "today", completed: "false" },
-    },
-  });
+      await tx.savedView.create({
+        data: {
+          userId: user.id,
+          name: "Due today",
+          filters: { dueFilter: "today", completed: "false" },
+        },
+      });
 
-  console.log("Created 2 saved views");
+      console.log("Created 2 saved views");
 
-  // Sharing & collaboration (FEAT-008): share the parent "Launch marketing
-  // website" todo with the collaborator as an EDITOR and assign it to them.
-  await prisma.todoShare.create({
-    data: {
-      todoId: parentTodo.id,
-      userId: collaborator.id,
-      role: "EDITOR",
-    },
-  });
+      // Sharing & collaboration (FEAT-008): share the parent "Launch marketing
+      // website" todo with the collaborator as an EDITOR and assign it to them.
+      await tx.todoShare.create({
+        data: {
+          todoId: parentTodo.id,
+          userId: collaborator.id,
+          role: "EDITOR",
+        },
+      });
 
-  await prisma.todo.update({
-    where: { id: parentTodo.id },
-    data: { assigneeId: collaborator.id },
-  });
+      await tx.todo.update({
+        where: { id: parentTodo.id },
+        data: { assigneeId: collaborator.id },
+      });
 
-  await prisma.activityLog.createMany({
-    data: [
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "todo.shared",
-        metadata: { sharedWithUserId: collaborator.id, role: "EDITOR" },
-      },
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "todo.assigned",
-        metadata: { assigneeId: collaborator.id },
-      },
-    ],
-  });
+      await tx.activityLog.createMany({
+        data: [
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "todo.shared",
+            metadata: { sharedWithUserId: collaborator.id, role: "EDITOR" },
+          },
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "todo.assigned",
+            metadata: { assigneeId: collaborator.id },
+          },
+        ],
+      });
 
-  // Notify the collaborator that a todo was shared with and assigned to them.
-  await prisma.notification.createMany({
-    data: [
-      {
-        userId: collaborator.id,
-        type: "todo.shared",
-        read: false,
-        payload: { todoId: parentTodo.id, todoTitle: parentTodo.title, role: "EDITOR" },
-      },
-      {
-        userId: collaborator.id,
-        type: "todo.assigned",
-        read: false,
-        payload: { todoId: parentTodo.id, todoTitle: parentTodo.title },
-      },
-    ],
-  });
+      // Notify the collaborator that a todo was shared with and assigned to them.
+      await tx.notification.createMany({
+        data: [
+          {
+            userId: collaborator.id,
+            type: "todo.shared",
+            read: false,
+            payload: { todoId: parentTodo.id, todoTitle: parentTodo.title, role: "EDITOR" },
+          },
+          {
+            userId: collaborator.id,
+            type: "todo.assigned",
+            read: false,
+            payload: { todoId: parentTodo.id, todoTitle: parentTodo.title },
+          },
+        ],
+      });
 
-  console.log("Shared and assigned the launch todo to the collaborator");
+      console.log("Shared and assigned the launch todo to the collaborator");
+    }, { timeout: 30_000 });
+  }
   console.log("Seeding completed!");
 }
 

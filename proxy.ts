@@ -4,12 +4,15 @@ import {
   enforceRateLimit,
   isRateLimitEnabled,
 } from "@/lib/rate-limit";
+import { buildAllowedOrigins, csrfViolation } from "@/lib/cors";
 import { logRequest, isRequestLogEnabled } from "@/lib/request-log";
 
-const ALLOWED_ORIGINS = [
-  "http://localhost:5173",
-  "http://localhost:3000",
-];
+// Origins (CORS_ALLOWED_ORIGINS, comma separated) allowed to call the API with
+// credentials. Localhost origins are only included outside production.
+const ALLOWED_ORIGINS = buildAllowedOrigins(
+  process.env.CORS_ALLOWED_ORIGINS,
+  process.env.NODE_ENV,
+);
 
 // Paths exempt from rate limiting (or that must never be locked out): the auth
 // bootstrap endpoints a freshly-loaded client hammers, and the OpenAPI doc.
@@ -37,6 +40,7 @@ function applyCors(response: NextResponse, origin: string, isAllowedOrigin: bool
     response.headers.set("Access-Control-Allow-Origin", origin);
   }
   response.headers.set("Access-Control-Allow-Credentials", "true");
+  response.headers.append("Vary", "Origin");
   // Expose pagination (X-Total-Count + RFC 5988 Link) and rate-limit headers to
   // browser clients, which otherwise cannot read non-simple response headers.
   response.headers.set(
@@ -66,11 +70,22 @@ export async function proxy(request: NextRequest) {
     );
     response.headers.set("Access-Control-Allow-Credentials", "true");
     response.headers.set("Access-Control-Max-Age", "86400");
+    response.headers.append("Vary", "Origin");
     return response;
   }
 
   const { pathname } = request.nextUrl;
   const startedAt = Date.now();
+
+  // CSRF defence for state-changing requests (applies to login/signup too).
+  const csrfError = csrfViolation(request, ALLOWED_ORIGINS);
+  if (csrfError) {
+    const response = NextResponse.json(
+      { success: false, error: { message: csrfError } },
+      { status: csrfError.startsWith("Unsupported") ? 415 : 403 }
+    );
+    return applyCors(response, origin, isAllowedOrigin);
+  }
 
   // Log a completed request handled (or rejected) by middleware itself. For
   // requests middleware forwards to a route handler, the handler's status is

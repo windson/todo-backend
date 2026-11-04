@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import {
   hashPassword,
@@ -7,6 +7,7 @@ import {
   verifyToken,
   getTokenFromRequest,
   getCurrentUser,
+  sessionCookieOptions,
   AUTH_COOKIE_NAME,
 } from "@/lib/auth";
 
@@ -116,5 +117,23 @@ describe("request token extraction", () => {
   it("getCurrentUser returns null for an unauthenticated request", async () => {
     const request = new NextRequest(new Request("http://localhost/api/todos"));
     expect(await getCurrentUser(request)).toBeNull();
+  });
+});
+
+describe("sessionCookieOptions", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses SameSite=Lax by default", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("CORS_ALLOWED_ORIGINS", "");
+    expect(sessionCookieOptions(10)).toMatchObject({ sameSite: "lax", secure: true });
+  });
+
+  it("uses SameSite=None; Secure when a cross-site SPA origin is configured", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("CORS_ALLOWED_ORIGINS", "https://spa.example.com");
+    expect(sessionCookieOptions(10)).toMatchObject({ sameSite: "none", secure: true });
   });
 });

@@ -53,4 +53,5 @@ process.env.PORT = port
 
 // Boot the Next.js standalone server. `server.js` is at the same archive root
 // as this file (both land in /var/task after unzip).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 require('./server.js')

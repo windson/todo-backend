@@ -44,6 +44,16 @@ Parameters:
     MinValue: 3
     MaxValue: 900
     Description: Per-request timeout for the Web Function.
+  CorsAllowedOrigins:
+    Type: String
+    Default: ""
+    Description: >-
+      Comma separated browser origins (e.g. the separately hosted SPA) allowed to
+      call the API with credentials. When set, the session cookie becomes
+      SameSite=None; Secure so it is sent cross-site.
+
+Conditions:
+  HasCorsAllowedOrigins: !Not [!Equals [!Ref CorsAllowedOrigins, ""]]
 
 Resources:
   # IAM role Lambda assumes to manage the network-connector ENIs in the VPC.
@@ -181,6 +191,7 @@ Resources:
             - MasterSecretArn:
                 Fn::ImportValue: !Sub "${DatabaseStackName}-MasterUserSecretArn"
           DB_SSL: require
+          CORS_ALLOWED_ORIGINS: !If [HasCorsAllowedOrigins, !Ref CorsAllowedOrigins, !Ref AWS::NoValue]
           JWT_SECRET: !Sub
             - "{{resolve:secretsmanager:${JwtSecretArn}:SecretString}}"
             - JwtSecretArn:
