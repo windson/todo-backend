@@ -101,7 +101,17 @@ phases:
       # build if it did not make it into the standalone package.
       - 'test -f .next/standalone/index.js || { echo "ERROR: .next/standalone/index.js missing; the Web Function entry (infra/webfunction/index.js) was not copied into the package." >&2; exit 1; }'
       - 'test -d .next/standalone/node_modules/.prisma/client || { echo "ERROR: generated Prisma client missing from standalone bundle." >&2; exit 1; }'
-      - ARTIFACT_KEY="todo-backend/${CODEBUILD_RESOLVED_SOURCE_VERSION}.zip"
+      # Artifact key. CODEBUILD_RESOLVED_SOURCE_VERSION is the commit SHA for a
+      # GitHub source but is EMPTY for an S3 source, which used to produce the
+      # literal key "todo-backend/.zip". Fall back to build number + epoch seconds
+      # (unique per build) and fail loudly if SRC_VERSION is still empty before
+      # it is concatenated into the key (the fallback always sets a non-empty
+      # value, so this is a defense-in-depth check, not reachable in practice).
+      - |
+        SRC_VERSION="${CODEBUILD_RESOLVED_SOURCE_VERSION:-}"
+        if [ -z "$SRC_VERSION" ]; then SRC_VERSION="build-${CODEBUILD_BUILD_NUMBER:-0}-$(date +%s)"; fi
+        if [ -z "$SRC_VERSION" ]; then echo "ERROR: could not derive a non-empty source version for the artifact key; refusing to upload." >&2; exit 1; fi
+        ARTIFACT_KEY="todo-backend/${SRC_VERSION}.zip"
       # Zip the CONTENTS of .next/standalone at the archive root (server.js and
       # package.json land at the top level). `cd` keeps paths relative.
       - (cd .next/standalone && zip -r -q "$CODEBUILD_SRC_DIR/app.zip" .)

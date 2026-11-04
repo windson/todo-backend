@@ -103,6 +103,46 @@ aws cloudformation deploy --stack-name todo-backend-app --template-file infra/cl
 
 See [`CUTOVER.md`](./CUTOVER.md) for the full cutover (and optional canary) steps.
 
+## Build source and artifact key (S3-source builds)
+
+The CodeBuild project's declared source is GitHub, but a one-off build can be
+started from a source zip uploaded to S3 (`--source-type-override S3
+--source-location-override <ArtifactBucketName>/src/<name>.zip`). Three things matter for that path:
+
+- **The source zip must be uploaded to the pipeline's own artifact bucket.**
+  The CodeBuild service role (`infra/cloudformation/pipeline.yaml`) is granted
+  `s3:GetObject`/`s3:GetObjectVersion`/`s3:PutObject` only on the pipeline
+  stack's `ArtifactBucketName` output, not on any other bucket. A source zip
+  uploaded elsewhere fails the source-download step with an access-denied
+  error for `s3:GetObjectVersion`. Upload under a prefix such as `src/`, e.g.:
+
+  ```bash
+  aws s3 cp app-src.zip "s3://<ArtifactBucketName>/src/app-src.zip"
+  aws s3api head-object --bucket <ArtifactBucketName> --key src/app-src.zip \
+    --query VersionId --output text
+  ```
+
+- **Pass `sourceVersion` = the uploaded object's `VersionId`.** For an S3
+  source, `StartBuild` must be given `--source-type-override S3
+  --source-location-override <ArtifactBucketName>/src/<name>.zip
+  --source-version <VersionId>` (the `VersionId` from the `head-object` call
+  above; the artifact bucket already has versioning enabled). If
+  `--source-version` is omitted, CodeBuild does not reliably pick up the newly
+  uploaded object and may build a stale one.
+- **`CODEBUILD_RESOLVED_SOURCE_VERSION` is empty for S3 sources** (it is only the
+  commit SHA for GitHub sources). The buildspec therefore derives the artifact
+  key as follows, and fails the build (exit 1, message on stderr) if the result
+  would be empty or just `todo-backend/.zip`:
+
+  | Source | Artifact key |
+  |--------|--------------|
+  | GitHub (or any source with a resolved version) | `todo-backend/<CODEBUILD_RESOLVED_SOURCE_VERSION>.zip` |
+  | S3 (resolved version empty) | `todo-backend/build-<CODEBUILD_BUILD_NUMBER>-<epoch-seconds>.zip` |
+
+  Read the exact key from the `ArtifactObjectKey=...` line in the build log and
+  pass it to the `app` stack; do not guess it from a commit SHA when the source
+  was S3.
+
 ## Parameters
 
 - **network.yaml**: `VpcCidr` (default `10.42.0.0/16`), `PrivateSubnet1Cidr`, `PrivateSubnet2Cidr`.

@@ -36,6 +36,20 @@ The cutover is a **manual CloudFormation update** to `app.yaml`:
    CloudFormation creates a new `AWS::Lambda::WebFunctionRevision` from that
    object and updates the endpoint's `RevisionWeights` to point at it.
 
+> **S3-source builds.** The CodeBuild role can only read the pipeline stack's
+> artifact bucket (`ArtifactBucketName` output), so upload the source zip there
+> (it is versioned) under a prefix such as `src/`, read its `VersionId` with
+> `aws s3api head-object`, and start the build with
+> `--source-type-override S3 --source-location-override
+> <ArtifactBucketName>/src/<name>.zip --source-version <VersionId>`. A zip in
+> any other bucket fails with an access-denied error for `s3:GetObjectVersion`.
+> For an S3 source `CODEBUILD_RESOLVED_SOURCE_VERSION` is empty, so the key
+> printed in the log is
+> `todo-backend/build-<build-number>-<epoch-seconds>.zip` instead of
+> `todo-backend/<sha>.zip`. Always copy the key from the `ArtifactObjectKey=`
+> log line and pass it as `ArtifactObjectKey`. The build fails rather than
+> upload a key like `todo-backend/.zip`.
+
 ### Canary / blue-green (optional)
 
 `RevisionWeights` accepts up to two revisions. To canary, deploy the new

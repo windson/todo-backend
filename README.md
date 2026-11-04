@@ -157,6 +157,18 @@ Error responses:
 | npm run db:reset | Reset the database |
 | npm run db:studio | Open Prisma Studio |
 
+`npm run db:seed` runs `prisma db seed`, which Prisma maps (via the `prisma`
+key in `package.json`) to `npm run seed`: `ts-node --compiler-options
+{"module":"CommonJS"} prisma/seed.ts`. `prisma/seed.ts` only runs its `main`
+logic when executed as a script, guarded by `require.main === module`. That
+guard is **CommonJS-only** — `require` and `module` do not exist when the file
+is run under ESM (e.g. `tsx` or `node --loader` without the CommonJS compiler
+override), so under ESM the guard's `typeof require !== "undefined"` check is
+false and the seed silently does not run. Keep the `--compiler-options
+{"module":"CommonJS"}` override on the `seed` script, or replace the guard with
+an ESM-compatible entry-point check if the script is ever moved off `ts-node`
+CommonJS mode.
+
 ## Environment Variables
 
 Copy `.env.example` to `.env` and update as needed:
