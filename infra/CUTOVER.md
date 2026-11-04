@@ -36,6 +36,14 @@ The cutover is a **manual CloudFormation update** to `app.yaml`:
    CloudFormation creates a new `AWS::Lambda::WebFunctionRevision` from that
    object and updates the endpoint's `RevisionWeights` to point at it.
 
+> **S3-source builds.** If the build was started from an S3 source zip, pass
+> `--source-version <S3 object VersionId>` to `StartBuild` (otherwise CodeBuild
+> may not pick up the new object). In that case
+> `CODEBUILD_RESOLVED_SOURCE_VERSION` is empty and the key printed in the log is
+> `todo-backend/build-<build-number>-<epoch-seconds>.zip` instead of
+> `todo-backend/<sha>.zip`. Always copy the key from the `ArtifactObjectKey=`
+> log line. The build fails rather than upload a key like `todo-backend/.zip`.
+
 ### Canary / blue-green (optional)
 
 `RevisionWeights` accepts up to two revisions. To canary, deploy the new
