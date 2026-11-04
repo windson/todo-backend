@@ -47,8 +47,8 @@ The cutover is a **manual CloudFormation update** to `app.yaml`:
 > printed in the log is
 > `todo-backend/build-<build-number>-<epoch-seconds>.zip` instead of
 > `todo-backend/<sha>.zip`. Always copy the key from the `ArtifactObjectKey=`
-> log line and pass it as `ArtifactObjectKey`. The build fails rather than
-> upload a key like `todo-backend/.zip`.
+> log line and pass it as `ArtifactObjectKey`. The key is always non-empty by
+> construction.
 
 ### Canary / blue-green (optional)
 

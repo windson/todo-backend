@@ -126,13 +126,11 @@ started from a source zip uploaded to S3 (`--source-type-override S3
   source, `StartBuild` must be given `--source-type-override S3
   --source-location-override <ArtifactBucketName>/src/<name>.zip
   --source-version <VersionId>` (the `VersionId` from the `head-object` call
-  above; the artifact bucket already has versioning enabled). If
-  `--source-version` is omitted, CodeBuild does not reliably pick up the newly
-  uploaded object and may build a stale one.
+  above; the artifact bucket already has versioning enabled). Always pass
+  it so the build is pinned to the exact object version you uploaded.
 - **`CODEBUILD_RESOLVED_SOURCE_VERSION` is empty for S3 sources** (it is only the
   commit SHA for GitHub sources). The buildspec therefore derives the artifact
-  key as follows, and fails the build (exit 1, message on stderr) if the result
-  would be empty or just `todo-backend/.zip`:
+  key as follows, so the key is always non-empty by construction:
 
   | Source | Artifact key |
   |--------|--------------|
@@ -148,7 +146,7 @@ started from a source zip uploaded to S3 (`--source-type-override S3
 - **network.yaml**: `VpcCidr` (default `10.42.0.0/16`), `PrivateSubnet1Cidr`, `PrivateSubnet2Cidr`.
 - **database.yaml**: `NetworkStackName`, `DatabaseName` (`tododb`), `MasterUsername` (`todoadmin`), `EngineVersion` (default `16.6`, PostgreSQL 16 line, matching `docker-compose` `postgres:16` — **confirm it is offered in your region first**, see "Aurora engine version" below), `MinCapacity` (`0.5`), `MaxCapacity` (`4`).
 - **app.yaml**: `NetworkStackName`, `DatabaseStackName`, `PipelineStackName`, `ArtifactObjectKey`, `Runtime` (`nodejs24.x`), `FunctionName` (`todo-backend-api`), `Port` (`8080`), `TimeoutSeconds` (`30`), `CorsAllowedOrigins` (default empty; comma separated SPA origins, see "Cross-origin SPA" below).
-- **pipeline.yaml**: `DatabaseStackName`, `SourceRepositoryUrl`, `SourceBranch` (`feat/aws-iac-cicd`).
+- **pipeline.yaml**: `DatabaseStackName`, `SourceRepositoryUrl`, `SourceBranch` (default `feat/todo-backend-scaffold`).
 
 ## The Web Function server process
 

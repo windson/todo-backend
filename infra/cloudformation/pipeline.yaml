@@ -25,7 +25,7 @@ Parameters:
     Description: Git source cloned by CodeBuild.
   SourceBranch:
     Type: String
-    Default: "feat/aws-iac-cicd"
+    Default: "feat/todo-backend-scaffold"
     Description: Git branch CodeBuild builds from.
 
 Resources:

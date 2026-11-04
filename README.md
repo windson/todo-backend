@@ -160,7 +160,11 @@ Error responses:
 `npm run db:seed` runs `prisma db seed`, which Prisma maps (via the `prisma`
 key in `package.json`) to `npm run seed`: `ts-node --compiler-options
 {"module":"CommonJS"} prisma/seed.ts`. `prisma/seed.ts` only runs its `main`
-logic when executed as a script, guarded by `require.main === module`. That
+logic when executed as a script, guarded by `isMainModule(require, module)`
+(`require.main === module`, extracted so it is unit tested). A CommonJS smoke
+test in `tests/prisma/seed.test.ts` runs the real `ts-node` seed command with
+no passwords and asserts it fails fast with the missing-password error (no
+database needed), proving the guard fires. That
 guard is **CommonJS-only** — `require` and `module` do not exist when the file
 is run under ESM (e.g. `tsx` or `node --loader` without the CommonJS compiler
 override), so under ESM the guard's `typeof require !== "undefined"` check is
