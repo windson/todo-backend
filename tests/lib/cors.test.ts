@@ -36,6 +36,25 @@ describe("parseOrigins / buildAllowedOrigins", () => {
 describe("csrfViolation", () => {
   const allowed = [SPA];
 
+  it("allows a same-origin write when the allow-list is empty", () => {
+    const r = req("POST", { origin: "https://api.example.com", "content-type": "application/json" }, "{}");
+    expect(csrfViolation(r, [])).toBeNull();
+  });
+
+  it("allows a same-origin write behind a proxy via x-forwarded headers", () => {
+    const r = req("POST", {
+      origin: "https://app.example.com",
+      "x-forwarded-host": "app.example.com",
+      "x-forwarded-proto": "https",
+      "content-type": "application/json",
+    }, "{}");
+    expect(csrfViolation(r, [])).toBeNull();
+  });
+
+  it("still rejects a foreign origin when the allow-list is empty", () => {
+    expect(csrfViolation(req("POST", { origin: "https://evil.example" }), [])).toMatch(/not allowed/);
+  });
+
   it("ignores safe methods", () => {
     expect(csrfViolation(req("GET", { origin: "https://evil.example" }), allowed)).toBeNull();
   });

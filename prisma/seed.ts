@@ -301,177 +301,176 @@ async function main() {
     })) !== null;
   if (!alreadySeeded) {
     await prisma.$transaction(async (tx) => {
-  // Everything attached to the parent todo is created once, together with it.
-  // Add a couple of comments, an attachment reference, and some activity-log
-  // entries to the parent todo to exercise the rich-content feature.
-  await tx.comment.createMany({
-    data: [
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        body: "Kicking this off. See the **brief** in the attached doc.",
-      },
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        body: "Copy is drafted, moving on to analytics next.",
-      },
-    ],
-  });
+      // Add a couple of comments, an attachment reference, and some activity-log
+      // entries to the parent todo to exercise the rich-content feature.
+      await tx.comment.createMany({
+        data: [
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            body: "Kicking this off. See the **brief** in the attached doc.",
+          },
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            body: "Copy is drafted, moving on to analytics next.",
+          },
+        ],
+      });
 
-  await tx.attachment.create({
-    data: {
-      todoId: parentTodo.id,
-      filename: "launch-brief.pdf",
-      url: "https://example.com/files/launch-brief.pdf",
-      mimeType: "application/pdf",
-      size: 248_000,
-    },
-  });
+      await tx.attachment.create({
+        data: {
+          todoId: parentTodo.id,
+          filename: "launch-brief.pdf",
+          url: "https://example.com/files/launch-brief.pdf",
+          mimeType: "application/pdf",
+          size: 248_000,
+        },
+      });
 
-  await tx.activityLog.createMany({
-    data: [
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "todo.created",
-        metadata: { title: parentTodo.title },
-      },
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "comment.created",
-      },
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "attachment.added",
-        metadata: { filename: "launch-brief.pdf" },
-      },
-    ],
-  });
+      await tx.activityLog.createMany({
+        data: [
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "todo.created",
+            metadata: { title: parentTodo.title },
+          },
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "comment.created",
+          },
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "attachment.added",
+            metadata: { filename: "launch-brief.pdf" },
+          },
+        ],
+      });
 
-  console.log("Created comments, an attachment, and activity for the parent todo");
+      console.log("Created comments, an attachment, and activity for the parent todo");
 
-  // Create a recurring todo to exercise the recurrence feature. Completing it
-  // via the API will spawn the next weekly occurrence.
-  if (!(await todoExists("Weekly team sync"))) await tx.todo.create({
-    data: {
-      title: "Weekly team sync",
-      description: "Recurring weekly standup with the team",
-      priority: Priority.MEDIUM,
-      startDate: now,
-      dueDate: tomorrow,
-      recurrenceRule: "WEEKLY",
-      recurrenceInterval: 1,
-      categoryId: categories[0].id,
-      order: 14,
-      userId: user.id,
-    },
-  });
+      // Create a recurring todo to exercise the recurrence feature. Completing it
+      // via the API will spawn the next weekly occurrence.
+      if (!(await todoExists("Weekly team sync"))) await tx.todo.create({
+        data: {
+          title: "Weekly team sync",
+          description: "Recurring weekly standup with the team",
+          priority: Priority.MEDIUM,
+          startDate: now,
+          dueDate: tomorrow,
+          recurrenceRule: "WEEKLY",
+          recurrenceInterval: 1,
+          categoryId: categories[0].id,
+          order: 14,
+          userId: user.id,
+        },
+      });
 
-  console.log("Created 1 recurring todo");
+      console.log("Created 1 recurring todo");
 
-  // Add an in-app reminder on the parent todo and an unread notification so the
-  // reminders/notifications feature has seed data to surface.
-  const reminderAt = new Date(now.getTime() + 60 * 60 * 1000); // one hour out
-  await tx.reminder.create({
-    data: {
-      todoId: parentTodo.id,
-      userId: user.id,
-      remindAt: reminderAt,
-      channel: "INAPP",
-    },
-  });
+      // Add an in-app reminder on the parent todo and an unread notification so the
+      // reminders/notifications feature has seed data to surface.
+      const reminderAt = new Date(now.getTime() + 60 * 60 * 1000); // one hour out
+      await tx.reminder.create({
+        data: {
+          todoId: parentTodo.id,
+          userId: user.id,
+          remindAt: reminderAt,
+          channel: "INAPP",
+        },
+      });
 
-  await tx.notification.create({
-    data: {
-      userId: user.id,
-      type: "reminder.due",
-      read: false,
-      payload: {
-        todoId: parentTodo.id,
-        todoTitle: parentTodo.title,
-        channel: "INAPP",
-      },
-    },
-  });
+      await tx.notification.create({
+        data: {
+          userId: user.id,
+          type: "reminder.due",
+          read: false,
+          payload: {
+            todoId: parentTodo.id,
+            todoTitle: parentTodo.title,
+            channel: "INAPP",
+          },
+        },
+      });
 
-  console.log("Created 1 reminder and 1 unread notification");
+      console.log("Created 1 reminder and 1 unread notification");
 
-  // Add a couple of saved views (named smart filters) so the saved-views /
-  // board feature has seed data. `filters` mirrors the GET /api/todos query
-  // params the frontend round-trips through its TodoFilters.
-  await tx.savedView.create({
-    data: {
-      userId: user.id,
-      name: "High priority",
-      filters: { priority: "HIGH,URGENT", completed: "false", sortBy: "dueDate", sortOrder: "asc" },
-    },
-  });
+      // Add a couple of saved views (named smart filters) so the saved-views /
+      // board feature has seed data. `filters` mirrors the GET /api/todos query
+      // params the frontend round-trips through its TodoFilters.
+      await tx.savedView.create({
+        data: {
+          userId: user.id,
+          name: "High priority",
+          filters: { priority: "HIGH,URGENT", completed: "false", sortBy: "dueDate", sortOrder: "asc" },
+        },
+      });
 
-  await tx.savedView.create({
-    data: {
-      userId: user.id,
-      name: "Due today",
-      filters: { dueFilter: "today", completed: "false" },
-    },
-  });
+      await tx.savedView.create({
+        data: {
+          userId: user.id,
+          name: "Due today",
+          filters: { dueFilter: "today", completed: "false" },
+        },
+      });
 
-  console.log("Created 2 saved views");
+      console.log("Created 2 saved views");
 
-  // Sharing & collaboration (FEAT-008): share the parent "Launch marketing
-  // website" todo with the collaborator as an EDITOR and assign it to them.
-  await tx.todoShare.create({
-    data: {
-      todoId: parentTodo.id,
-      userId: collaborator.id,
-      role: "EDITOR",
-    },
-  });
+      // Sharing & collaboration (FEAT-008): share the parent "Launch marketing
+      // website" todo with the collaborator as an EDITOR and assign it to them.
+      await tx.todoShare.create({
+        data: {
+          todoId: parentTodo.id,
+          userId: collaborator.id,
+          role: "EDITOR",
+        },
+      });
 
-  await tx.todo.update({
-    where: { id: parentTodo.id },
-    data: { assigneeId: collaborator.id },
-  });
+      await tx.todo.update({
+        where: { id: parentTodo.id },
+        data: { assigneeId: collaborator.id },
+      });
 
-  await tx.activityLog.createMany({
-    data: [
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "todo.shared",
-        metadata: { sharedWithUserId: collaborator.id, role: "EDITOR" },
-      },
-      {
-        todoId: parentTodo.id,
-        userId: user.id,
-        action: "todo.assigned",
-        metadata: { assigneeId: collaborator.id },
-      },
-    ],
-  });
+      await tx.activityLog.createMany({
+        data: [
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "todo.shared",
+            metadata: { sharedWithUserId: collaborator.id, role: "EDITOR" },
+          },
+          {
+            todoId: parentTodo.id,
+            userId: user.id,
+            action: "todo.assigned",
+            metadata: { assigneeId: collaborator.id },
+          },
+        ],
+      });
 
-  // Notify the collaborator that a todo was shared with and assigned to them.
-  await tx.notification.createMany({
-    data: [
-      {
-        userId: collaborator.id,
-        type: "todo.shared",
-        read: false,
-        payload: { todoId: parentTodo.id, todoTitle: parentTodo.title, role: "EDITOR" },
-      },
-      {
-        userId: collaborator.id,
-        type: "todo.assigned",
-        read: false,
-        payload: { todoId: parentTodo.id, todoTitle: parentTodo.title },
-      },
-    ],
-  });
+      // Notify the collaborator that a todo was shared with and assigned to them.
+      await tx.notification.createMany({
+        data: [
+          {
+            userId: collaborator.id,
+            type: "todo.shared",
+            read: false,
+            payload: { todoId: parentTodo.id, todoTitle: parentTodo.title, role: "EDITOR" },
+          },
+          {
+            userId: collaborator.id,
+            type: "todo.assigned",
+            read: false,
+            payload: { todoId: parentTodo.id, todoTitle: parentTodo.title },
+          },
+        ],
+      });
 
-  console.log("Shared and assigned the launch todo to the collaborator");
-    });
+      console.log("Shared and assigned the launch todo to the collaborator");
+    }, { timeout: 30_000 });
   }
   console.log("Seeding completed!");
 }
